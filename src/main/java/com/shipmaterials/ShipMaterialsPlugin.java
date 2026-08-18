@@ -10,6 +10,7 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.ScriptPreFired;
@@ -390,6 +391,20 @@ public class ShipMaterialsPlugin extends Plugin
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
 		if (event.getContainerId() == InventoryID.BANK && panel != null)
+		{
+			panel.refresh();
+		}
+	}
+
+	@Subscribe
+	public void onStatChanged(StatChanged event)
+	{
+		// Real skill levels aren't populated yet when startUp()'s initial refresh() runs (they
+		// arrive via a separate packet shortly after login) - confirmed by logging: sailing level
+		// read as 0 at the LOGGED_IN transition itself, only becoming correct ~20s later once
+		// something else happened to refresh the panel. Refreshing on every stat sync/change
+		// catches both that initial sync and any later real level-up while tracking something.
+		if (panel != null)
 		{
 			panel.refresh();
 		}
