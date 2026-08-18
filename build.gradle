@@ -3,7 +3,12 @@ plugins {
 }
 
 group = 'com.requiredmaterials'
-version = '1.0.0'
+
+// The hub reads the version from runelite-plugin.properties, so that file owns it and the
+// jar follows - otherwise the two drift and the hub silently wins.
+def pluginManifest = new Properties()
+file('runelite-plugin.properties').withInputStream { pluginManifest.load(it) }
+version = pluginManifest.getProperty('version')
 
 repositories {
     mavenLocal()
