@@ -211,7 +211,7 @@ public class RequiredMaterialsPlugin extends Plugin
 				materialsManager.setSkill(partName, skill);
 				if (panel != null)
 				{
-					panel.refresh();
+					panel.onTracked(skill);
 				}
 			});
 		});

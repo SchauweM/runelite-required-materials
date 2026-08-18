@@ -12,7 +12,7 @@ import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,7 +49,6 @@ public class RequiredMaterialsPanel extends PluginPanel
 	private static final Color COLOR_HAVE_SOME = new Color(255, 165, 0);
 	private static final Pattern LEVEL_REQUIREMENT_PATTERN = Pattern.compile("^Level (\\d+) (.+)$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern VARIANT_SUFFIX = Pattern.compile("^(.*?)\\s*\\(([^)]*)\\)$");
-	private static final List<String> SKILL_DISPLAY_ORDER = Arrays.asList("Sailing", "Construction");
 	private static final String UNKNOWN_SKILL = "Other";
 
 	private final MaterialsManager materialsManager;
@@ -77,6 +76,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		clearAll.addActionListener(e -> clientThread.invoke(() ->
 		{
 			materialsManager.clear();
+			skillExpanded.clear();
 			refresh();
 		}));
 
@@ -96,6 +96,21 @@ public class RequiredMaterialsPanel extends PluginPanel
 		add(listContainer, BorderLayout.CENTER);
 	}
 
+	/**
+	 * Opens the tracked skill's section. A skill appearing for the first time collapses the
+	 * others, so a switch of skill leaves only the new one open; re-tracking a skill already on
+	 * the list just reopens it and leaves the rest alone.
+	 */
+	void onTracked(String skill)
+	{
+		if (!skillExpanded.containsKey(skill))
+		{
+			skillExpanded.replaceAll((s, expanded) -> false);
+		}
+		skillExpanded.put(skill, true);
+		refresh();
+	}
+
 	void refresh()
 	{
 		listContainer.removeAll();
@@ -108,38 +123,31 @@ public class RequiredMaterialsPanel extends PluginPanel
 		}
 		else
 		{
+			// getRequirements() is in tracking order, so a skill's highest position is the last
+			// time anything was tracked under it.
 			Map<String, List<TrackedRequirement>> byPart = new LinkedHashMap<>();
+			Map<String, Integer> lastTrackedAt = new HashMap<>();
+			int position = 0;
 			for (TrackedRequirement requirement : materialsManager.getRequirements())
 			{
 				byPart.computeIfAbsent(canonicalGroupKey(requirement.getPartName()), k -> new ArrayList<>())
 					.add(requirement);
+				lastTrackedAt.put(skillOf(requirement), position++);
 			}
 
 			Map<String, List<Map.Entry<String, List<TrackedRequirement>>>> bySkill = new LinkedHashMap<>();
 			for (Map.Entry<String, List<TrackedRequirement>> entry : byPart.entrySet())
 			{
-				String skill = entry.getValue().get(0).getSkill();
-				bySkill.computeIfAbsent(skill != null ? skill : UNKNOWN_SKILL, k -> new ArrayList<>()).add(entry);
+				bySkill.computeIfAbsent(skillOf(entry.getValue().get(0)), k -> new ArrayList<>()).add(entry);
 			}
 
-			List<String> orderedSkills = new ArrayList<>(SKILL_DISPLAY_ORDER);
-			for (String skill : bySkill.keySet())
-			{
-				if (!orderedSkills.contains(skill))
-				{
-					orderedSkills.add(skill);
-				}
-			}
+			List<String> orderedSkills = new ArrayList<>(bySkill.keySet());
+			orderedSkills.sort(Comparator.comparingInt((String skill) -> lastTrackedAt.getOrDefault(skill, -1)).reversed());
 
 			boolean firstShown = true;
 			for (String skill : orderedSkills)
 			{
-				List<Map.Entry<String, List<TrackedRequirement>>> groups = bySkill.get(skill);
-				if (groups == null || groups.isEmpty())
-				{
-					continue;
-				}
-				listContainer.add(buildAccordion(skill, groups, firstShown));
+				listContainer.add(buildAccordion(skill, bySkill.get(skill), firstShown));
 				listContainer.add(Box.createVerticalStrut(6));
 				firstShown = false;
 			}
@@ -232,6 +240,11 @@ public class RequiredMaterialsPanel extends PluginPanel
 		}
 
 		return wrapper;
+	}
+
+	private String skillOf(TrackedRequirement requirement)
+	{
+		return requirement.getSkill() != null ? requirement.getSkill() : UNKNOWN_SKILL;
 	}
 
 	private String variantBaseName(String partName)
