@@ -62,6 +62,9 @@ public class RequiredMaterialsPlugin extends Plugin
 	private WikiRecipeService wikiRecipeService;
 
 	@Inject
+	private BankSnapshot bankSnapshot;
+
+	@Inject
 	private BankButtonManager bankButtonManager;
 
 	@Inject
@@ -84,7 +87,7 @@ public class RequiredMaterialsPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new RequiredMaterialsPanel(materialsManager, client, clientThread, skillIconManager);
+		panel = new RequiredMaterialsPanel(materialsManager, client, clientThread, skillIconManager, bankSnapshot);
 
 		// load() resolves item ids, which must happen on the client thread - startUp() isn't
 		// guaranteed to be on it (e.g. toggled from the config UI).
@@ -422,7 +425,12 @@ public class RequiredMaterialsPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		if (event.getContainerId() == InventoryID.BANK && panel != null)
+		if (event.getContainerId() == InventoryID.BANK)
+		{
+			bankSnapshot.update(event.getItemContainer());
+		}
+
+		if (panel != null)
 		{
 			panel.refresh();
 		}
@@ -449,5 +457,6 @@ public class RequiredMaterialsPlugin extends Plugin
 	public void onScriptPostFired(ScriptPostFired event)
 	{
 		bankGroupedView.onScriptPostFired(event.getScriptId());
+		bankButtonManager.onScriptPostFired(event.getScriptId());
 	}
 }
