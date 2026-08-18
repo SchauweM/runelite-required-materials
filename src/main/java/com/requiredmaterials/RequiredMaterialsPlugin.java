@@ -1,9 +1,6 @@
 package com.requiredmaterials;
 
-import com.google.inject.Provides;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -14,17 +11,16 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.ScriptPreFired;
+import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.SkillIconManager;
 import net.runelite.client.plugins.Plugin;
@@ -41,6 +37,14 @@ import net.runelite.client.util.ImageUtil;
 )
 public class RequiredMaterialsPlugin extends Plugin
 {
+	private static final List<String> TRACKED_SKILLS = Arrays.asList("Sailing", "Construction");
+	private static final Pattern PART_NAME_PATTERN = Pattern.compile("^(.*?):");
+	private static final Pattern TAG_PATTERN = Pattern.compile("<[^>]*>");
+	private static final Pattern BOAT_TYPE_SUFFIX = Pattern.compile("\\(([^)]*)\\)$");
+	// "Check Materials" labels the part "Camphor hull materials"; every other trigger just says
+	// "Camphor hull", which is also the wiki page name.
+	private static final Pattern MATERIALS_SUFFIX = Pattern.compile("(?i)\\s+materials$");
+
 	@Inject
 	private Client client;
 
@@ -54,16 +58,19 @@ public class RequiredMaterialsPlugin extends Plugin
 	private MaterialsManager materialsManager;
 
 	@Inject
+	private WikiRecipeService wikiRecipeService;
+
+	@Inject
 	private BankButtonManager bankButtonManager;
 
 	@Inject
 	private BankGroupedView bankGroupedView;
 
 	@Inject
-	private ConfigManager configManager;
-
-	@Inject
 	private SkillIconManager skillIconManager;
+
+	private final ChatMaterialsParser chatMaterialsParser = new ChatMaterialsParser();
+	private final GuideLevelReader guideLevelReader = new GuideLevelReader();
 
 	private RequiredMaterialsPanel panel;
 	private NavigationButton navButton;
@@ -73,21 +80,13 @@ public class RequiredMaterialsPlugin extends Plugin
 	private String lastKnownGuideV1Title;
 	private String pendingContinuationPartName;
 
-	@Provides
-	RequiredMaterialsConfig provideConfig(ConfigManager configManager)
-	{
-		return configManager.getConfig(RequiredMaterialsConfig.class);
-	}
-
 	@Override
 	protected void startUp()
 	{
 		panel = new RequiredMaterialsPanel(materialsManager, client, clientThread, skillIconManager);
 
-		// Loading resolves item names to ids via the client's item definitions, which can
-		// only be read on the client thread - startUp() itself isn't guaranteed to be on it
-		// (e.g. when the plugin is toggled on from the config UI), so defer via ClientThread
-		// rather than crashing; invoke() runs synchronously if we're already on it.
+		// load() resolves item ids, which must happen on the client thread - startUp() isn't
+		// guaranteed to be on it (e.g. toggled from the config UI).
 		clientThread.invoke(() ->
 		{
 			materialsManager.load();
@@ -130,303 +129,162 @@ public class RequiredMaterialsPlugin extends Plugin
 			return;
 		}
 
-		MaterialsManager.ParseResult result;
-		if (message.contains(":"))
+		Matcher matcher = PART_NAME_PATTERN.matcher(message);
+		if (matcher.find())
 		{
-			result = materialsManager.tryParseAndTrack(message);
+			String partName = MATERIALS_SUFFIX.matcher(
+				TAG_PATTERN.matcher(matcher.group(1)).replaceAll("").replace('\u00A0', ' ').trim()
+			).replaceFirst("");
+			if (partName.isEmpty())
+			{
+				return;
+			}
+
+			// Accumulated only as a fallback for Construction activities the wiki has no
+			// {{Recipe}} for (Mahogany Homes, Birdhouses, STASH units); the wiki stays primary.
+			String materialsText = message.substring(matcher.end()).trim();
+			pendingContinuationPartName = chatMaterialsParser.accumulate(partName, materialsText) ? partName : null;
+
+			trackFromWiki(partName, currentSkillSource());
 		}
 		else if (pendingContinuationPartName != null)
 		{
-			result = materialsManager.tryAppendContinuation(pendingContinuationPartName, message);
-		}
-		else
-		{
-			return;
-		}
-
-		if (result == null)
-		{
-			pendingContinuationPartName = null;
-			return;
-		}
-
-		pendingContinuationPartName = result.isContinuationExpected() ? result.getPartName() : null;
-		log.debug("Required materials: now tracking requirements for '{}'", result.getPartName());
-
-		materialsManager.setSkill(result.getPartName(), currentSkillSource());
-
-		List<String> levelRequirements = findLevelRequirements(result.getPartName());
-		if (!levelRequirements.isEmpty())
-		{
-			materialsManager.setLevelRequirements(result.getPartName(), levelRequirements);
-		}
-
-		if (panel != null)
-		{
-			panel.refresh();
+			pendingContinuationPartName = chatMaterialsParser.appendContinuation(pendingContinuationPartName, message)
+				? pendingContinuationPartName : null;
 		}
 	}
 
-	private static final int GUIDE_TOP_LEVEL_SLOT_SCAN = 40;
-	private static final Pattern DIGITS_ONLY = Pattern.compile("^\\d+$");
-	private static final Pattern BOAT_TYPE_SUFFIX = Pattern.compile("\\s*\\([^)]*\\)$");
-	private static final List<String> TRACKED_SKILLS = Arrays.asList("Sailing", "Construction");
-
-	private String stripBoatTypeSuffix(String partName)
+	@Subscribe(priority = -1)
+	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
-		return BOAT_TYPE_SUFFIX.matcher(partName).replaceFirst("").trim();
-	}
+		bankGroupedView.onMenuOptionClicked(event);
 
-	/**
-	 * Skill level requirements are never in the chat message. Each guide row shows the
-	 * required primary skill level as a separate plain-number widget to the left of the entry
-	 * (the only requirement for some rows, e.g. "Wooden cargo hold" has no other skill req at
-	 * all), and optionally a "<Part name><br>Requires: <col=...>Level N Skill</col>, ..." widget
-	 * for any additional skills (e.g. Construction alongside Sailing). The two are siblings
-	 * correlated by row (same Y position), not by any parent/child or array-adjacency
-	 * relationship.
-	 */
-	private List<String> findLevelRequirements(String partName)
-	{
-		for (int groupId : new int[] {InterfaceID.SKILL_GUIDE, InterfaceID.SKILL_GUIDE_V2})
-		{
-			String primarySkill = groupId == InterfaceID.SKILL_GUIDE_V2
-				? matchingTrackedSkill(lastKnownGuideV2Title, true)
-				: matchingTrackedSkill(lastKnownGuideV1Title, false);
-			if (primarySkill == null)
-			{
-				continue;
-			}
-
-			for (int childId = 0; childId <= GUIDE_TOP_LEVEL_SLOT_SCAN; childId++)
-			{
-				Widget w = client.getWidget(groupId, childId);
-				if (w == null)
-				{
-					continue;
-				}
-
-				List<Widget> numberWidgets = new ArrayList<>();
-				List<Widget> nameWidgets = new ArrayList<>();
-				collectRowWidgets(w, numberWidgets, nameWidgets);
-
-				for (Widget nameWidget : nameWidgets)
-				{
-					List<String> result = extractRequirements(nameWidget, partName, numberWidgets, primarySkill);
-					if (result != null)
-					{
-						return result;
-					}
-				}
-			}
-		}
-		return new ArrayList<>();
-	}
-
-	private static final Pattern LEVEL_TEXT_PATTERN = Pattern.compile("^Level (\\d+)$", Pattern.CASE_INSENSITIVE);
-	private static final Pattern MATERIAL_LINE_PATTERN = Pattern.compile("^(.+?):\\s*(\\d+)$");
-	private static final Pattern TAG_PATTERN = Pattern.compile("<[^>]*>");
-
-	/**
-	 * Unlike ship upgrades, Furniture Creation gives everything needed for a click in one shot -
-	 * the clicked widget's own text (item name, required level, and a "Mat: Qty<br>..." materials
-	 * block, up to 3 slots padded with empty or flavour-text ones when unused) - so there's no
-	 * chat message to parse or multi-line list to reassemble.
-	 */
-	private void trackFurnitureItem(MenuOptionClicked event)
-	{
-		Widget itemWidget = event.getWidget();
-		if (itemWidget == null)
+		if (!"Build".equals(event.getMenuOption()))
 		{
 			return;
 		}
 
 		String partName = TAG_PATTERN.matcher(event.getMenuTarget()).replaceAll("").trim();
-
-		List<Widget> texts = new ArrayList<>();
-		collectAllText(itemWidget, texts);
-
-		String levelText = null;
-		String materialsText = null;
-		for (Widget w : texts)
+		if (furnitureCreationOpen)
 		{
-			String t = w.getText().trim();
-			if (LEVEL_TEXT_PATTERN.matcher(t).matches())
-			{
-				levelText = t;
-			}
-			else if (t.contains("<br>"))
-			{
-				materialsText = t;
-			}
+			trackFromWiki(partName, "Construction");
 		}
-
-		if (materialsText == null)
+		else if (shipCustomisationOpen)
 		{
-			return;
-		}
-
-		Map<String, Integer> materials = new LinkedHashMap<>();
-		for (String segment : materialsText.split("<br>"))
-		{
-			// Unused material slots are padded with either nothing or flavour text describing
-			// the built item - neither matches "Name: Qty", so they're naturally skipped here.
-			Matcher m = MATERIAL_LINE_PATTERN.matcher(segment.trim());
-			if (m.matches())
-			{
-				materials.put(m.group(1).trim(), Integer.parseInt(m.group(2)));
-			}
-		}
-
-		if (materials.isEmpty())
-		{
-			return;
-		}
-
-		List<String> levelRequirements = new ArrayList<>();
-		if (levelText != null)
-		{
-			levelRequirements.add(levelText + " Construction");
-		}
-
-		materialsManager.trackDirect(partName, materials, levelRequirements);
-		materialsManager.setSkill(partName, "Construction");
-		if (panel != null)
-		{
-			panel.refresh();
-		}
-	}
-
-	private void collectAllText(Widget widget, List<Widget> out)
-	{
-		if (widget == null)
-		{
-			return;
-		}
-
-		if (widget.getText() != null && !widget.getText().isEmpty())
-		{
-			out.add(widget);
-		}
-
-		for (Widget[] childArray : new Widget[][] {widget.getChildren(), widget.getDynamicChildren(), widget.getStaticChildren()})
-		{
-			if (childArray == null)
-			{
-				continue;
-			}
-			for (Widget child : childArray)
-			{
-				if (child != null && child != widget)
-				{
-					collectAllText(child, out);
-				}
-			}
-		}
-	}
-
-	private void collectRowWidgets(Widget widget, List<Widget> numberWidgets, List<Widget> nameWidgets)
-	{
-		if (widget == null)
-		{
-			return;
-		}
-
-		String text = widget.getText();
-		if (text != null && !text.isEmpty())
-		{
-			if (DIGITS_ONLY.matcher(text.trim()).matches())
-			{
-				numberWidgets.add(widget);
-			}
-			else
-			{
-				nameWidgets.add(widget);
-			}
-		}
-
-		for (Widget[] childArray : new Widget[][] {widget.getChildren(), widget.getDynamicChildren()})
-		{
-			if (childArray == null)
-			{
-				continue;
-			}
-			for (Widget child : childArray)
-			{
-				if (child != null && child != widget)
-				{
-					collectRowWidgets(child, numberWidgets, nameWidgets);
-				}
-			}
+			trackFromWiki(partName, "Sailing");
 		}
 	}
 
 	/**
-	 * @return the requirement list if nameWidget is the row for partName, else null.
+	 * Looks the part up on the wiki, falling back to chat/guide-widget data for Construction
+	 * items with no recipe there. The wiki callback runs off the client thread, so tracking
+	 * hops back onto it.
 	 */
-	private List<String> extractRequirements(Widget nameWidget, String partName, List<Widget> numberWidgets, String primarySkill)
+	private void trackFromWiki(String partName, String skill)
 	{
-		String text = nameWidget.getText();
-		int brIdx = text.indexOf("<br>");
-		String bareName = (brIdx != -1 ? text.substring(0, brIdx) : text).trim();
+		String pageName = wikiPageName(partName, skill);
+		String variant = wikiVariant(partName, skill);
 
-		// Some parts (e.g. "Wooden mast and linen sails") come as several boat-type-specific
-		// chat messages - "Wooden mast and linen sails (raft)", "(skiff)", "(sloop)" - but the
-		// guide only has one row for all of them, labelled without the suffix.
-		if (!bareName.equalsIgnoreCase(partName) && !bareName.equalsIgnoreCase(stripBoatTypeSuffix(partName)))
+		wikiRecipeService.fetchRecipes(pageName, recipes ->
+		{
+			WikiRecipeService.Recipe recipe = selectRecipe(recipes, variant);
+
+			clientThread.invoke(() ->
+			{
+				boolean tracked;
+				if (recipe != null)
+				{
+					materialsManager.track(partName, recipe.getMaterials(), recipe.getLevelRequirements());
+					tracked = true;
+				}
+				else
+				{
+					tracked = "Construction".equals(skill) && trackFromChatFallback(partName);
+				}
+
+				if (!tracked)
+				{
+					log.warn("Required materials: could not resolve requirements for '{}' (page '{}')", partName, pageName);
+					return;
+				}
+
+				materialsManager.setSkill(partName, skill);
+				if (panel != null)
+				{
+					panel.refresh();
+				}
+			});
+		});
+	}
+
+	private boolean trackFromChatFallback(String partName)
+	{
+		Map<String, Integer> materials = chatMaterialsParser.getMaterials(partName);
+		if (materials == null || materials.isEmpty())
+		{
+			return false;
+		}
+
+		materialsManager.track(partName, materials, guideLevelReader.findLevelRequirements(client, partName, "Construction"));
+		return true;
+	}
+
+	private WikiRecipeService.Recipe selectRecipe(List<WikiRecipeService.Recipe> recipes, String variant)
+	{
+		if (recipes.isEmpty())
 		{
 			return null;
 		}
-
-		List<String> result = new ArrayList<>();
-
-		Widget sameRowNumber = findWidgetOnSameRow(nameWidget, numberWidgets);
-		if (sameRowNumber != null)
+		if (variant != null)
 		{
-			result.add("Level " + sameRowNumber.getText().trim() + " " + primarySkill);
-		}
-
-		int requiresIdx = text.indexOf("Requires:");
-		if (requiresIdx != -1)
-		{
-			String rawRequirements = text.substring(requiresIdx + "Requires:".length());
-			String stripped = rawRequirements.replaceAll("<[^>]*>", "").trim();
-			for (String piece : stripped.split(","))
+			for (WikiRecipeService.Recipe recipe : recipes)
 			{
-				String p = piece.trim();
-				if (!p.isEmpty())
+				if (variant.equalsIgnoreCase(recipe.getOutputSubtext()))
 				{
-					result.add(p);
+					return recipe;
 				}
 			}
 		}
-
-		return result;
-	}
-
-	private Widget findWidgetOnSameRow(Widget target, List<Widget> candidates)
-	{
-		int targetY = target.getOriginalY();
-		Widget best = null;
-		int bestDistance = Integer.MAX_VALUE;
-		for (Widget candidate : candidates)
-		{
-			int distance = Math.abs(candidate.getOriginalY() - targetY);
-			if (distance < bestDistance)
-			{
-				bestDistance = distance;
-				best = candidate;
-			}
-		}
-		// A generous tolerance since the number sits a little higher/lower than the label text.
-		return bestDistance <= 12 ? best : null;
+		return recipes.get(0);
 	}
 
 	/**
-	 * Both skill guide interfaces are shared by every skill, dynamically populated with
-	 * whichever skill is currently selected - so unlike SAILING_CUSTOMISATION we can't gate on
-	 * either just being open, and check their title widgets instead. We check live rather than
-	 * caching an "open" flag, since the user can switch skills within an already-open guide.
+	 * Only Sailing names use a trailing "(raft/skiff/sloop)" as a boat-size marker; a
+	 * Construction parenthetical like "STASH units (beginner)" is part of the name itself.
+	 */
+	private String wikiVariant(String partName, String skill)
+	{
+		if (!"Sailing".equals(skill))
+		{
+			return null;
+		}
+		Matcher matcher = BOAT_TYPE_SUFFIX.matcher(partName);
+		if (matcher.find())
+		{
+			return matcher.group(1).trim();
+		}
+		// Rafts are the only size calling this part a "base", and carry no suffix.
+		return partName.toLowerCase().endsWith("base") ? "Raft" : null;
+	}
+
+	private String wikiPageName(String partName, String skill)
+	{
+		if (!"Sailing".equals(skill))
+		{
+			return partName;
+		}
+		String base = BOAT_TYPE_SUFFIX.matcher(partName).replaceAll("").trim();
+		// The wiki files the raft variant under "<tier> hull" too.
+		if (base.toLowerCase().endsWith("base"))
+		{
+			base = base.substring(0, base.length() - "base".length()) + "hull";
+		}
+		return base;
+	}
+
+	/**
+	 * One guide interface is shared by every skill, so being open isn't enough - its title says
+	 * which skill it's showing. Read live, since the user can switch skills without reopening.
 	 */
 	private boolean isTrackedSkillGuideOpen()
 	{
@@ -452,10 +310,9 @@ public class RequiredMaterialsPlugin extends Plugin
 	}
 
 	/**
-	 * Which skill a just-tracked chat message came from: whichever guide is currently open, if
-	 * any (guide titles are refreshed as a side effect of {@link #isTrackedSkillGuideOpen()},
-	 * already called earlier in the same event) - otherwise SAILING_CUSTOMISATION must be what
-	 * triggered it, since that's a Sailing-only interface.
+	 * Whichever guide is open, else Sailing - the only other chat source is
+	 * SAILING_CUSTOMISATION. Relies on {@link #isTrackedSkillGuideOpen()} having refreshed the
+	 * cached titles earlier in the same event.
 	 */
 	private String currentSkillSource()
 	{
@@ -469,10 +326,8 @@ public class RequiredMaterialsPlugin extends Plugin
 
 	private void refreshCachedGuideTitles()
 	{
-		// SkillGuideV2's FRAME is a static draggable/resizable header container whose own
-		// text is always empty - the actual title is a dynamically-created child widget
-		// added at runtime, only reachable by walking its dynamic children, not via a direct
-		// groupId/childId lookup (which is why a direct read here always came back blank).
+		// V2's FRAME is a static container whose own text is always empty - the title lives on a
+		// dynamically-created child, so a direct getText() on it always comes back blank.
 		String dynamicV2Text = findNonEmptyDynamicChildText(
 			client.getWidget(InterfaceID.SKILL_GUIDE_V2, InterfaceID.SkillGuideV2.FRAME & 0xFFFF));
 		if (dynamicV2Text != null)
@@ -562,11 +417,8 @@ public class RequiredMaterialsPlugin extends Plugin
 	@Subscribe
 	public void onStatChanged(StatChanged event)
 	{
-		// Real skill levels aren't populated yet when startUp()'s initial refresh() runs (they
-		// arrive via a separate packet shortly after login) - confirmed by logging: sailing level
-		// read as 0 at the LOGGED_IN transition itself, only becoming correct ~20s later once
-		// something else happened to refresh the panel. Refreshing on every stat sync/change
-		// catches both that initial sync and any later real level-up while tracking something.
+		// Levels still read as 0 at the LOGGED_IN transition - they arrive in a later packet,
+		// which this catches (along with any subsequent level-up).
 		if (panel != null)
 		{
 			panel.refresh();
@@ -583,16 +435,5 @@ public class RequiredMaterialsPlugin extends Plugin
 	public void onScriptPostFired(ScriptPostFired event)
 	{
 		bankGroupedView.onScriptPostFired(event.getScriptId());
-	}
-
-	@Subscribe(priority = -1)
-	public void onMenuOptionClicked(MenuOptionClicked event)
-	{
-		bankGroupedView.onMenuOptionClicked(event);
-
-		if (furnitureCreationOpen && "Build".equals(event.getMenuOption()))
-		{
-			trackFurnitureItem(event);
-		}
 	}
 }

@@ -38,14 +38,10 @@ import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
 /**
- * Sidebar panel listing what's currently tracked. Click a part's "x" to stop tracking just
- * that requirement, or "Clear all" to reset everything (also clears what the bank filter
- * highlights).
+ * Sidebar panel listing what's currently tracked, in a collapsible section per skill.
  *
- * Parts that come in several boat-size variants - "Wooden mast and linen sails (raft)",
- * "(skiff)", "(sloop)", or a raft's "base" vs a skiff/sloop's "hull" - are tracked as separate
- * requirements but grouped under one card with a picker, rather than shown as unrelated-looking
- * duplicate entries.
+ * Boat-size variants of the same part - "(raft)"/"(skiff)"/"(sloop)", or a raft's "base" vs a
+ * skiff/sloop's "hull" - are tracked separately but share one card with a picker.
  */
 public class RequiredMaterialsPanel extends PluginPanel
 {
@@ -252,9 +248,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 			String suffix = m.group(2).trim();
 			return suffix.isEmpty() ? suffix : capitalize(suffix);
 		}
-		// A raft's structural part carries no boat-size suffix at all - it's just "<tier> base",
-		// since raft is the only size that calls it that (skiff/sloop call it "hull (skiff/sloop)").
-		// No suffix on a base part means it implies "Raft".
+		// An unsuffixed "base" is the raft's name for the part.
 		if (partName.toLowerCase().endsWith("base"))
 		{
 			return "Raft";
@@ -263,10 +257,8 @@ public class RequiredMaterialsPanel extends PluginPanel
 	}
 
 	/**
-	 * A raft's structural part is called "base", while a skiff/sloop's equivalent is called
-	 * "hull" - not separate upgrades, just different names for the same part slot depending on
-	 * which boat size is being built, so they're grouped under one canonical key ("<name> hull")
-	 * to share a single card and boat-size picker (Raft/Skiff/Sloop) instead of two.
+	 * "<tier> base" (raft) and "<tier> hull" (skiff/sloop) are the same part slot under
+	 * different names, so both map to the "hull" key to share one card and picker.
 	 */
 	private String canonicalGroupKey(String partName)
 	{
@@ -281,10 +273,6 @@ public class RequiredMaterialsPanel extends PluginPanel
 		return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
 	}
 
-	/**
-	 * The outer card chrome (name, remove-everything-inside button) wrapping whatever content
-	 * panel is passed in - shared by both plain single cards and grouped-by-variant cards.
-	 */
 	private JPanel buildOuterCard(String title, List<TrackedRequirement> allInside, JPanel content)
 	{
 		JPanel card = new JPanel(new BorderLayout(0, 4));
@@ -315,10 +303,6 @@ public class RequiredMaterialsPanel extends PluginPanel
 		return card;
 	}
 
-	/**
-	 * A boat-size picker plus the currently-selected variant's content, for one part type that
-	 * has more than one boat-size variant tracked.
-	 */
 	private JPanel buildVariantSection(String selectionKey, List<TrackedRequirement> variants)
 	{
 		JComboBox<String> variantPicker = new JComboBox<>();
@@ -344,9 +328,8 @@ public class RequiredMaterialsPanel extends PluginPanel
 		section.add(Box.createVerticalStrut(4));
 		section.add(buildContent(variants.get(savedIndex)));
 
-		// buildContent() reads live client state (bank contents, skill levels), which - like
-		// every RuneLite Client API call - asserts it's running on the client thread, not
-		// whatever thread fired this Swing action event (the AWT event thread).
+		// refresh() reads bank/skill state, which asserts it's on the client thread - Swing
+		// listeners fire on the AWT event thread.
 		variantPicker.addActionListener(e -> clientThread.invoke(() ->
 		{
 			selectedVariantIndex.put(selectionKey, variantPicker.getSelectedIndex());
@@ -373,10 +356,17 @@ public class RequiredMaterialsPanel extends PluginPanel
 			content.add(Box.createVerticalStrut(6));
 		}
 
-		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
-		for (RequiredMaterial material : requirement.getMaterials())
+		if (requirement.getMaterials().isEmpty())
 		{
-			content.add(buildMaterialLine(material, bank));
+			content.add(wrappedText("No materials required.", ColorScheme.LIGHT_GRAY_COLOR));
+		}
+		else
+		{
+			ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+			for (RequiredMaterial material : requirement.getMaterials())
+			{
+				content.add(buildMaterialLine(material, bank));
+			}
 		}
 
 		return content;
@@ -421,9 +411,8 @@ public class RequiredMaterialsPanel extends PluginPanel
 		int have = bank == null ? 0 : bank.count(material.getItemId());
 		int need = material.getQuantity();
 
-		// have == 0 covers two cases we can't tell apart - genuinely own none, or the bank
-		// just hasn't been opened this session yet - so it stays neutral gray either way
-		// rather than falsely flagging items you might actually already have.
+		// have == 0 could mean "own none" or "bank not opened yet", so it stays neutral gray
+		// rather than flagging items you may already have.
 		Color color;
 		if (have >= need)
 		{
@@ -452,9 +441,8 @@ public class RequiredMaterialsPanel extends PluginPanel
 	}
 
 	/**
-	 * JLabel's HTML "width:Npx" wrapping trick clips instead of reflowing once the sidebar's
-	 * actual available width doesn't match the guessed pixel value - a JTextArea with real
-	 * line-wrap reflows against whatever width it's actually laid out at.
+	 * A JTextArea rather than a JLabel: JLabel's HTML "width:Npx" wrapping clips instead of
+	 * reflowing when the sidebar's real width doesn't match the hardcoded pixel value.
 	 */
 	private JTextArea wrappedText(String text, Color color)
 	{
