@@ -33,8 +33,8 @@ import net.runelite.client.util.ImageUtil;
 @Slf4j
 @PluginDescriptor(
 	name = "Required Materials",
-	description = "Tracks materials needed for Sailing ship upgrades and Construction furniture, and highlights them in your bank",
-	tags = {"sailing", "construction", "ship", "bank", "materials"}
+	description = "Tracks the materials and levels you still need for Sailing and Construction builds, and groups them in your bank",
+	tags = {"sailing", "construction", "materials", "bank", "skilling", "shipwright"}
 )
 public class RequiredMaterialsPlugin extends Plugin
 {

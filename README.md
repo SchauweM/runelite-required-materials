@@ -90,16 +90,24 @@ This launches the real RuneLite client in-process with the plugin already loaded
 log in and test against your own account. It restores your usual profile and session the same
 way the normal client does.
 
-The `run` task is pinned to a specific JDK and passes the `--add-opens` flags RuneLite's event
-bus needs:
+By default this runs on whatever JDK Gradle itself is using. RuneLite doesn't get along with
+very new JDKs — on Java 26 the event bus fails to register subscribers — so if `gradle run`
+misbehaves, point it at an older one without editing the build:
 
-```groovy
-executable = '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java'
+```bash
+gradle run -PrunJdk=/path/to/jdk/bin/java
 ```
 
-If that path doesn't exist on your machine, point it at a JDK you do have. Without the
-`--add-opens` flags, event subscriber registration silently falls back to slower reflection
-and logs `LambdaConversionException` warnings, so keep them if you change the JDK.
+To avoid passing that every time, put it in a `gradle.properties` at the project root, which
+is gitignored:
+
+```
+runJdk=/path/to/jdk/bin/java
+```
+
+The `--add-opens` flags in the `run` task mirror the official launcher's own. Without them,
+event subscriber registration silently falls back to slower reflection and logs
+`LambdaConversionException` warnings, so leave them in place if you change the JDK.
 
 To restart after a code change, kill the running dev client and start it again — a plain
 `SIGTERM` shuts it down cleanly:
