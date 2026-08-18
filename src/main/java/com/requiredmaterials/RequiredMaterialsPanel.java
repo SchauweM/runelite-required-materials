@@ -55,16 +55,18 @@ public class RequiredMaterialsPanel extends PluginPanel
 	private final Client client;
 	private final ClientThread clientThread;
 	private final SkillIconManager skillIconManager;
+	private final BankSnapshot bankSnapshot;
 	private final JPanel listContainer = new JPanel();
 	private final Map<String, Integer> selectedVariantIndex = new HashMap<>();
 	private final Map<String, Boolean> skillExpanded = new HashMap<>();
 
-	RequiredMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread, SkillIconManager skillIconManager)
+	RequiredMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread, SkillIconManager skillIconManager, BankSnapshot bankSnapshot)
 	{
 		this.materialsManager = materialsManager;
 		this.client = client;
 		this.clientThread = clientThread;
 		this.skillIconManager = skillIconManager;
+		this.bankSnapshot = bankSnapshot;
 
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -88,7 +90,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 		top.add(header);
 		top.add(Box.createVerticalStrut(4));
-		top.add(wrappedText("Open your bank to update quantities below.", ColorScheme.LIGHT_GRAY_COLOR));
+		top.add(wrappedText("Counts include your bank and inventory.", ColorScheme.LIGHT_GRAY_COLOR));
 
 		listContainer.setLayout(new BoxLayout(listContainer, BoxLayout.Y_AXIS));
 
@@ -376,9 +378,10 @@ public class RequiredMaterialsPanel extends PluginPanel
 		else
 		{
 			ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+			ItemContainer inventory = client.getItemContainer(InventoryID.INV);
 			for (RequiredMaterial material : requirement.getMaterials())
 			{
-				content.add(buildMaterialLine(material, bank));
+				content.add(buildMaterialLine(material, bank, inventory));
 			}
 		}
 
@@ -401,6 +404,11 @@ public class RequiredMaterialsPanel extends PluginPanel
 		return wrappedText("Requires: " + levelRequirement, color);
 	}
 
+	private int count(ItemContainer container, int itemId)
+	{
+		return container == null ? 0 : container.count(itemId);
+	}
+
 	private Skill findSkillByName(String name)
 	{
 		for (Skill skill : Skill.values())
@@ -413,7 +421,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		return null;
 	}
 
-	private JTextArea buildMaterialLine(RequiredMaterial material, ItemContainer bank)
+	private JTextArea buildMaterialLine(RequiredMaterial material, ItemContainer bank, ItemContainer inventory)
 	{
 		if (material.getItemId() == null)
 		{
@@ -421,7 +429,10 @@ public class RequiredMaterialsPanel extends PluginPanel
 			return wrappedText(text, ColorScheme.PROGRESS_ERROR_COLOR);
 		}
 
-		int have = bank == null ? 0 : bank.count(material.getItemId());
+		// The bank container only exists once the bank has been opened this session; fall back to
+		// what it held last time so counts survive a restart.
+		int inBank = bank != null ? bank.count(material.getItemId()) : bankSnapshot.count(material.getItemId());
+		int have = inBank + count(inventory, material.getItemId());
 		int need = material.getQuantity();
 
 		// have == 0 could mean "own none" or "bank not opened yet", so it stays neutral gray

@@ -29,7 +29,7 @@ import net.runelite.http.api.item.ItemPrice;
 @Singleton
 public class MaterialsManager
 {
-	private static final String CONFIG_GROUP = "requiredmaterials";
+	static final String CONFIG_GROUP = "requiredmaterials";
 	private static final String CONFIG_KEY_TRACKED = "tracked";
 
 	private static final Type SAVE_TYPE =
