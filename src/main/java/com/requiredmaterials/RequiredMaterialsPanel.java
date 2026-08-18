@@ -1,9 +1,18 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,6 +22,7 @@ import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
@@ -23,42 +33,44 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.Skill;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.game.SkillIconManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
 /**
- * Sidebar panel listing what's currently tracked. Click a part's "x" to stop tracking just
- * that requirement, or "Clear all" to reset everything (also clears what the bank filter
- * highlights).
+ * Sidebar panel listing what's currently tracked, in a collapsible section per skill.
  *
- * Parts that come in several boat-size variants - "Wooden mast and linen sails (raft)",
- * "(skiff)", "(sloop)", or a raft's "base" vs a skiff/sloop's "hull" - are tracked as separate
- * requirements but grouped under one card with a picker, rather than shown as unrelated-looking
- * duplicate entries.
+ * Boat-size variants of the same part - "(raft)"/"(skiff)"/"(sloop)", or a raft's "base" vs a
+ * skiff/sloop's "hull" - are tracked separately but share one card with a picker.
  */
-public class ShipMaterialsPanel extends PluginPanel
+public class RequiredMaterialsPanel extends PluginPanel
 {
 	private static final Color COLOR_HAVE_ENOUGH = new Color(96, 220, 96);
 	private static final Color COLOR_HAVE_SOME = new Color(255, 165, 0);
 	private static final Pattern LEVEL_REQUIREMENT_PATTERN = Pattern.compile("^Level (\\d+) (.+)$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern VARIANT_SUFFIX = Pattern.compile("^(.*?)\\s*\\(([^)]*)\\)$");
+	private static final List<String> SKILL_DISPLAY_ORDER = Arrays.asList("Sailing", "Construction");
+	private static final String UNKNOWN_SKILL = "Other";
 
 	private final MaterialsManager materialsManager;
 	private final Client client;
 	private final ClientThread clientThread;
+	private final SkillIconManager skillIconManager;
 	private final JPanel listContainer = new JPanel();
 	private final Map<String, Integer> selectedVariantIndex = new HashMap<>();
+	private final Map<String, Boolean> skillExpanded = new HashMap<>();
 
-	ShipMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread)
+	RequiredMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread, SkillIconManager skillIconManager)
 	{
 		this.materialsManager = materialsManager;
 		this.client = client;
 		this.clientThread = clientThread;
+		this.skillIconManager = skillIconManager;
 
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-		JLabel title = new JLabel("Tracked ship materials");
+		JLabel title = new JLabel("Required Materials");
 		title.setForeground(ColorScheme.BRAND_ORANGE);
 
 		JButton clearAll = new JButton("Clear all");
@@ -91,7 +103,7 @@ public class ShipMaterialsPanel extends PluginPanel
 		if (materialsManager.isEmpty())
 		{
 			listContainer.add(wrappedText(
-				"Nothing tracked yet. Click a ship upgrade's requirements in-game to start tracking.",
+				"Nothing tracked yet. Click a ship upgrade's requirements, a Furniture Creation item, or any item in the Sailing or Construction skill guide in-game to start tracking.",
 				ColorScheme.LIGHT_GRAY_COLOR));
 		}
 		else
@@ -103,19 +115,123 @@ public class ShipMaterialsPanel extends PluginPanel
 					.add(requirement);
 			}
 
+			Map<String, List<Map.Entry<String, List<TrackedRequirement>>>> bySkill = new LinkedHashMap<>();
 			for (Map.Entry<String, List<TrackedRequirement>> entry : byPart.entrySet())
 			{
-				List<TrackedRequirement> variants = entry.getValue();
-				listContainer.add(variants.size() > 1
-					? buildOuterCard(capitalize(entry.getKey()), variants, buildVariantSection(entry.getKey(), variants))
-					: buildOuterCard(variants.get(0).getPartName(), variants,
-						buildContent(variants.get(0))));
+				String skill = entry.getValue().get(0).getSkill();
+				bySkill.computeIfAbsent(skill != null ? skill : UNKNOWN_SKILL, k -> new ArrayList<>()).add(entry);
+			}
+
+			List<String> orderedSkills = new ArrayList<>(SKILL_DISPLAY_ORDER);
+			for (String skill : bySkill.keySet())
+			{
+				if (!orderedSkills.contains(skill))
+				{
+					orderedSkills.add(skill);
+				}
+			}
+
+			boolean firstShown = true;
+			for (String skill : orderedSkills)
+			{
+				List<Map.Entry<String, List<TrackedRequirement>>> groups = bySkill.get(skill);
+				if (groups == null || groups.isEmpty())
+				{
+					continue;
+				}
+				listContainer.add(buildAccordion(skill, groups, firstShown));
 				listContainer.add(Box.createVerticalStrut(6));
+				firstShown = false;
 			}
 		}
 
 		listContainer.revalidate();
 		listContainer.repaint();
+	}
+
+	private JPanel buildAccordion(String skill, List<Map.Entry<String, List<TrackedRequirement>>> groups, boolean defaultExpanded)
+	{
+		boolean expanded = skillExpanded.computeIfAbsent(skill, k -> defaultExpanded);
+
+		JLabel arrow = new JLabel(expanded ? "-" : "+");
+		arrow.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		arrow.setFont(arrow.getFont().deriveFont(Font.BOLD));
+		arrow.setPreferredSize(new Dimension(12, arrow.getPreferredSize().height));
+
+		JLabel skillLabel = new JLabel(skill);
+		skillLabel.setForeground(ColorScheme.BRAND_ORANGE);
+		skillLabel.setFont(skillLabel.getFont().deriveFont(Font.BOLD));
+
+		Skill skillEnum = findSkillByName(skill);
+		JLabel skillIcon = skillEnum != null
+			? new JLabel(new ImageIcon(skillIconManager.getSkillImage(skillEnum, true)))
+			: null;
+
+		JPanel headerLabels = new JPanel();
+		headerLabels.setLayout(new BoxLayout(headerLabels, BoxLayout.X_AXIS));
+		headerLabels.setOpaque(false);
+		headerLabels.add(arrow);
+		headerLabels.add(Box.createHorizontalStrut(6));
+		if (skillIcon != null)
+		{
+			headerLabels.add(skillIcon);
+			headerLabels.add(Box.createHorizontalStrut(4));
+		}
+		headerLabels.add(skillLabel);
+
+		JPanel header = new JPanel(new BorderLayout());
+		header.setOpaque(true);
+		header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		header.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+		header.add(headerLabels, BorderLayout.WEST);
+		header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		header.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		MouseAdapter toggleListener = new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				clientThread.invoke(() ->
+				{
+					skillExpanded.put(skill, !skillExpanded.getOrDefault(skill, defaultExpanded));
+					refresh();
+				});
+			}
+		};
+		for (Component c : new Component[] {header, headerLabels, arrow, skillLabel, skillIcon})
+		{
+			if (c != null)
+			{
+				c.addMouseListener(toggleListener);
+			}
+		}
+
+		JPanel wrapper = new JPanel(new GridBagLayout());
+		wrapper.setOpaque(false);
+		wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		GridBagConstraints gbc = new GridBagConstraints();
+		gbc.gridx = 0;
+		gbc.gridy = 0;
+		gbc.weightx = 1.0;
+		gbc.fill = GridBagConstraints.HORIZONTAL;
+		wrapper.add(header, gbc);
+
+		if (expanded)
+		{
+			for (Map.Entry<String, List<TrackedRequirement>> entry : groups)
+			{
+				List<TrackedRequirement> variants = entry.getValue();
+				gbc.gridy++;
+				gbc.insets = new Insets(6, 0, 0, 0);
+				wrapper.add(variants.size() > 1
+					? buildOuterCard(capitalize(entry.getKey()), variants, buildVariantSection(entry.getKey(), variants))
+					: buildOuterCard(variants.get(0).getPartName(), variants, buildContent(variants.get(0))), gbc);
+			}
+		}
+
+		return wrapper;
 	}
 
 	private String variantBaseName(String partName)
@@ -132,9 +248,7 @@ public class ShipMaterialsPanel extends PluginPanel
 			String suffix = m.group(2).trim();
 			return suffix.isEmpty() ? suffix : capitalize(suffix);
 		}
-		// A raft's structural part carries no boat-size suffix at all - it's just "<tier> base",
-		// since raft is the only size that calls it that (skiff/sloop call it "hull (skiff/sloop)").
-		// No suffix on a base part means it implies "Raft".
+		// An unsuffixed "base" is the raft's name for the part.
 		if (partName.toLowerCase().endsWith("base"))
 		{
 			return "Raft";
@@ -143,10 +257,8 @@ public class ShipMaterialsPanel extends PluginPanel
 	}
 
 	/**
-	 * A raft's structural part is called "base", while a skiff/sloop's equivalent is called
-	 * "hull" - not separate upgrades, just different names for the same part slot depending on
-	 * which boat size is being built, so they're grouped under one canonical key ("<name> hull")
-	 * to share a single card and boat-size picker (Raft/Skiff/Sloop) instead of two.
+	 * "<tier> base" (raft) and "<tier> hull" (skiff/sloop) are the same part slot under
+	 * different names, so both map to the "hull" key to share one card and picker.
 	 */
 	private String canonicalGroupKey(String partName)
 	{
@@ -161,11 +273,6 @@ public class ShipMaterialsPanel extends PluginPanel
 		return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
 	}
 
-	/**
-	 * The outer card chrome (name, remove-everything-inside button) wrapping whatever content
-	 * panel is passed in - used for both plain single/grouped-by-boat-size cards and tier
-	 * cards, so all three levels share one consistent look.
-	 */
 	private JPanel buildOuterCard(String title, List<TrackedRequirement> allInside, JPanel content)
 	{
 		JPanel card = new JPanel(new BorderLayout(0, 4));
@@ -196,10 +303,6 @@ public class ShipMaterialsPanel extends PluginPanel
 		return card;
 	}
 
-	/**
-	 * A boat-size picker plus the currently-selected variant's content, for one part type that
-	 * has more than one boat-size variant tracked.
-	 */
 	private JPanel buildVariantSection(String selectionKey, List<TrackedRequirement> variants)
 	{
 		JComboBox<String> variantPicker = new JComboBox<>();
@@ -225,9 +328,8 @@ public class ShipMaterialsPanel extends PluginPanel
 		section.add(Box.createVerticalStrut(4));
 		section.add(buildContent(variants.get(savedIndex)));
 
-		// buildContent() reads live client state (bank contents, skill levels), which - like
-		// every RuneLite Client API call - asserts it's running on the client thread, not
-		// whatever thread fired this Swing action event (the AWT event thread).
+		// refresh() reads bank/skill state, which asserts it's on the client thread - Swing
+		// listeners fire on the AWT event thread.
 		variantPicker.addActionListener(e -> clientThread.invoke(() ->
 		{
 			selectedVariantIndex.put(selectionKey, variantPicker.getSelectedIndex());
@@ -254,10 +356,17 @@ public class ShipMaterialsPanel extends PluginPanel
 			content.add(Box.createVerticalStrut(6));
 		}
 
-		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
-		for (RequiredMaterial material : requirement.getMaterials())
+		if (requirement.getMaterials().isEmpty())
 		{
-			content.add(buildMaterialLine(material, bank));
+			content.add(wrappedText("No materials required.", ColorScheme.LIGHT_GRAY_COLOR));
+		}
+		else
+		{
+			ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+			for (RequiredMaterial material : requirement.getMaterials())
+			{
+				content.add(buildMaterialLine(material, bank));
+			}
 		}
 
 		return content;
@@ -302,9 +411,8 @@ public class ShipMaterialsPanel extends PluginPanel
 		int have = bank == null ? 0 : bank.count(material.getItemId());
 		int need = material.getQuantity();
 
-		// have == 0 covers two cases we can't tell apart - genuinely own none, or the bank
-		// just hasn't been opened this session yet - so it stays neutral gray either way
-		// rather than falsely flagging items you might actually already have.
+		// have == 0 could mean "own none" or "bank not opened yet", so it stays neutral gray
+		// rather than flagging items you may already have.
 		Color color;
 		if (have >= need)
 		{
@@ -333,9 +441,8 @@ public class ShipMaterialsPanel extends PluginPanel
 	}
 
 	/**
-	 * JLabel's HTML "width:Npx" wrapping trick clips instead of reflowing once the sidebar's
-	 * actual available width doesn't match the guessed pixel value - a JTextArea with real
-	 * line-wrap reflows against whatever width it's actually laid out at.
+	 * A JTextArea rather than a JLabel: JLabel's HTML "width:Npx" wrapping clips instead of
+	 * reflowing when the sidebar's real width doesn't match the hardcoded pixel value.
 	 */
 	private JTextArea wrappedText(String text, Color color)
 	{

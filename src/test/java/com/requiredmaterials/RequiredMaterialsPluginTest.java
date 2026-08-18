@@ -1,13 +1,13 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 import net.runelite.client.RuneLite;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 
-public class ShipMaterialsPluginTest
+public class RequiredMaterialsPluginTest
 {
 	public static void main(String[] args) throws Exception
 	{
-		ExternalPluginManager.loadBuiltin(ShipMaterialsPlugin.class);
+		ExternalPluginManager.loadBuiltin(RequiredMaterialsPlugin.class);
 		RuneLite.main(args);
 	}
 }

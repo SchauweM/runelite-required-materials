@@ -1,4 +1,4 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 import java.awt.Color;
 import javax.inject.Inject;
@@ -13,13 +13,9 @@ import net.runelite.api.widgets.WidgetType;
 
 /**
  * Injects a small toggle button into the bank window that switches {@link BankGroupedView}'s
- * grouped layout on and off.
- *
- * Positioning matches how Quest Helper places its own bank button: it doesn't anchor to the
- * close button widget at all - it attaches directly to {@link InterfaceID.Bankmain#UNIVERSE}
- * (the bank's background/frame widget) at a hardcoded pixel offset near the top-right corner,
- * right where the close X sits. We do the same, just a bit further left so we don't overlap
- * Quest Helper's own button if that's also installed.
+ * grouped layout on and off. Attaches directly to {@link InterfaceID.Bankmain#UNIVERSE} (the
+ * bank's background/frame widget) at a hardcoded pixel offset near the top-right corner, close
+ * to the close button, rather than anchoring to any specific widget there.
  */
 @Slf4j
 @Singleton
@@ -38,19 +34,13 @@ public class BankButtonManager
 	private BankGroupedView bankGroupedView;
 
 	private Widget buttonRect;
-	private Widget buttonLabel;
-
-	public boolean isFilterActive()
-	{
-		return bankGroupedView.isActive();
-	}
 
 	public void onBankWidgetLoaded()
 	{
 		Widget parent = client.getWidget(InterfaceID.Bankmain.UNIVERSE);
 		if (parent == null)
 		{
-			log.warn("Ship materials: bank loaded but the background widget ({}) was null - "
+			log.warn("Required materials: bank loaded but the background widget ({}) was null - "
 				+ "can't inject the filter button", InterfaceID.Bankmain.UNIVERSE);
 			return;
 		}
@@ -61,7 +51,6 @@ public class BankButtonManager
 	public void onBankWidgetClosed()
 	{
 		buttonRect = null;
-		buttonLabel = null;
 		bankGroupedView.reset();
 	}
 
@@ -69,7 +58,6 @@ public class BankButtonManager
 	{
 		if (buttonRect != null)
 		{
-			// Already injected for this bank session.
 			return;
 		}
 
@@ -80,7 +68,7 @@ public class BankButtonManager
 		rect.setOriginalHeight(BUTTON_SIZE);
 		rect.setFilled(true);
 		rect.setOpacity(60);
-		rect.setName("Ship materials filter");
+		rect.setName("Required materials filter");
 		rect.setHasListener(true);
 		rect.setOnClickListener((JavaScriptCallback) ev -> toggleFilter());
 
@@ -100,7 +88,6 @@ public class BankButtonManager
 		label.revalidate();
 
 		this.buttonRect = rect;
-		this.buttonLabel = label;
 	}
 
 	private void toggleFilter()

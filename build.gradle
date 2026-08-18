@@ -2,7 +2,7 @@ plugins {
     id 'java'
 }
 
-group = 'com.shipmaterials'
+group = 'com.requiredmaterials'
 version = '1.0.0'
 
 java {
@@ -18,7 +18,7 @@ repositories {
 }
 
 def runeLiteVersion = 'latest.release'
-def pluginMainClass = 'com.shipmaterials.ShipMaterialsPluginTest'
+def pluginMainClass = 'com.requiredmaterials.RequiredMaterialsPluginTest'
 
 dependencies {
     compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
