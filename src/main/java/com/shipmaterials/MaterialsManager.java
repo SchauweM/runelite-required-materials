@@ -248,6 +248,15 @@ public class MaterialsManager
 		return requirements.values();
 	}
 
+	public void setLevelRequirements(String partName, List<String> levelRequirements)
+	{
+		TrackedRequirement requirement = requirements.get(partName);
+		if (requirement != null)
+		{
+			requirement.setLevelRequirements(levelRequirements);
+		}
+	}
+
 	public void remove(String partName)
 	{
 		if (requirements.remove(partName) != null)

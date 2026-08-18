@@ -2,17 +2,30 @@ package com.shipmaterials;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
 import net.runelite.api.Client;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.Skill;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
@@ -20,20 +33,42 @@ import net.runelite.client.ui.PluginPanel;
  * Sidebar panel listing what's currently tracked. Click a part's "x" to stop tracking just
  * that requirement, or "Clear all" to reset everything (also clears what the bank filter
  * highlights).
+ *
+ * Parts nest up to two levels: a material tier (Oak, Teak, ...) can have several distinct
+ * part types tracked under it (base, hull, ...), and each part type can itself have several
+ * boat-size variants (raft, skiff, sloop) - each level only appears when there's more than
+ * one thing to show at it.
  */
 public class ShipMaterialsPanel extends PluginPanel
 {
 	private static final Color COLOR_HAVE_ENOUGH = new Color(96, 220, 96);
 	private static final Color COLOR_HAVE_SOME = new Color(255, 165, 0);
+	private static final Pattern LEVEL_REQUIREMENT_PATTERN = Pattern.compile("^Level (\\d+) (.+)$", Pattern.CASE_INSENSITIVE);
+
+	// Some parts come as several boat-size tiers - "Wooden mast and linen sails (raft)",
+	// "(skiff)", "(sloop)" - tracked as separate requirements since each has its own
+	// materials/levels, but grouped under one picker rather than shown as unrelated-looking
+	// duplicate entries.
+	private static final Pattern VARIANT_SUFFIX = Pattern.compile("^(.*?)\\s*\\(([^)]*)\\)$");
+
+	// Other parts tier by a leading material word instead - "Oak hull", "Teak hull",
+	// "Mahogany cargo hold", "Bronze cannon", "Rune salvaging hook" - which is what forms the
+	// outer grouping level (Oak/Teak/... containing all its part types together).
+	private static final List<String> MATERIAL_TIER_PREFIXES = Arrays.asList(
+		"Wooden", "Oak", "Teak", "Mahogany", "Camphor", "Rosewood", "Ironwood",
+		"Bronze", "Iron", "Steel", "Mithril", "Adamant", "Rune", "Dragon");
 
 	private final MaterialsManager materialsManager;
 	private final Client client;
+	private final ClientThread clientThread;
 	private final JPanel listContainer = new JPanel();
+	private final Map<String, Integer> selectedVariantIndex = new HashMap<>();
 
-	ShipMaterialsPanel(MaterialsManager materialsManager, Client client)
+	ShipMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread)
 	{
 		this.materialsManager = materialsManager;
 		this.client = client;
+		this.clientThread = clientThread;
 
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -42,11 +77,11 @@ public class ShipMaterialsPanel extends PluginPanel
 		title.setForeground(ColorScheme.BRAND_ORANGE);
 
 		JButton clearAll = new JButton("Clear all");
-		clearAll.addActionListener(e ->
+		clearAll.addActionListener(e -> clientThread.invoke(() ->
 		{
 			materialsManager.clear();
 			refresh();
-		});
+		}));
 
 		JPanel header = new JPanel(new BorderLayout());
 		header.add(title, BorderLayout.WEST);
@@ -76,9 +111,35 @@ public class ShipMaterialsPanel extends PluginPanel
 		}
 		else
 		{
+			Map<String, List<TrackedRequirement>> byTier = new LinkedHashMap<>();
+			Map<String, List<TrackedRequirement>> untieredByPart = new LinkedHashMap<>();
 			for (TrackedRequirement requirement : materialsManager.getRequirements())
 			{
-				listContainer.add(buildRequirementCard(requirement));
+				String tier = matchingTierPrefix(requirement.getPartName());
+				if (tier != null)
+				{
+					byTier.computeIfAbsent(tier, k -> new ArrayList<>()).add(requirement);
+				}
+				else
+				{
+					untieredByPart.computeIfAbsent(variantBaseName(requirement.getPartName()), k -> new ArrayList<>())
+						.add(requirement);
+				}
+			}
+
+			for (Map.Entry<String, List<TrackedRequirement>> tierEntry : byTier.entrySet())
+			{
+				listContainer.add(buildTierOrCombinedCard(tierEntry.getKey(), tierEntry.getValue()));
+				listContainer.add(Box.createVerticalStrut(6));
+			}
+
+			for (Map.Entry<String, List<TrackedRequirement>> entry : untieredByPart.entrySet())
+			{
+				List<TrackedRequirement> variants = entry.getValue();
+				listContainer.add(variants.size() > 1
+					? buildOuterCard(capitalize(entry.getKey()), variants, buildVariantSection(entry.getKey(), variants))
+					: buildOuterCard(variants.get(0).getPartName(), variants,
+						buildContent(variants.get(0))));
 				listContainer.add(Box.createVerticalStrut(6));
 			}
 		}
@@ -87,42 +148,306 @@ public class ShipMaterialsPanel extends PluginPanel
 		listContainer.repaint();
 	}
 
-	private JPanel buildRequirementCard(TrackedRequirement requirement)
+	private String variantBaseName(String partName)
 	{
-		JPanel card = new JPanel();
-		card.setLayout(new BorderLayout(0, 4));
+		Matcher m = VARIANT_SUFFIX.matcher(partName);
+		return m.matches() ? m.group(1).trim() : partName;
+	}
+
+	private String variantLabel(String partName)
+	{
+		Matcher m = VARIANT_SUFFIX.matcher(partName);
+		if (m.matches())
+		{
+			String suffix = m.group(2).trim();
+			return suffix.isEmpty() ? suffix : capitalize(suffix);
+		}
+		// A raft's structural part carries no boat-size suffix at all - it's just "<tier> base",
+		// since raft is the only size that calls it that (skiff/sloop call it "hull (skiff/sloop)").
+		// No suffix on a base part means it implies "Raft".
+		if (partName.toLowerCase().endsWith("base"))
+		{
+			return "Raft";
+		}
+		return partName;
+	}
+
+	/**
+	 * A raft's structural part is called "base", while a skiff/sloop's equivalent is called
+	 * "hull" - not separate upgrades, just different names for the same part slot depending on
+	 * which boat size is being built. Grouped under one canonical key so they share a single
+	 * card and boat-size picker (Raft/Skiff/Sloop) instead of splitting into two.
+	 */
+	private String canonicalPartType(String partType)
+	{
+		return "base".equalsIgnoreCase(partType) ? "hull" : partType;
+	}
+
+	private String matchingTierPrefix(String partName)
+	{
+		for (String tier : MATERIAL_TIER_PREFIXES)
+		{
+			if (partName.length() > tier.length()
+				&& partName.regionMatches(true, 0, tier, 0, tier.length())
+				&& partName.charAt(tier.length()) == ' ')
+			{
+				return tier;
+			}
+		}
+		return null;
+	}
+
+	private String capitalize(String s)
+	{
+		return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+	}
+
+	/**
+	 * One material tier (e.g. "Oak"). If only one part type is tracked under it (e.g. just
+	 * "Hull"), there's nothing to visually separate it from, so it reads as one combined title
+	 * like a plain card ("Oak hull") instead of a tier card with a single redundant
+	 * sub-section. Only tiers with several part types get the full nested rendering, one
+	 * sub-section per part type (e.g. "Base", "Hull"), each with its own boat-size picker if
+	 * it has more than one variant.
+	 */
+	private JPanel buildTierOrCombinedCard(String tier, List<TrackedRequirement> requirements)
+	{
+		Map<String, List<TrackedRequirement>> byPartType = new LinkedHashMap<>();
+		for (TrackedRequirement requirement : requirements)
+		{
+			String withoutTier = requirement.getPartName().substring(tier.length()).trim();
+			String partType = canonicalPartType(variantBaseName(withoutTier));
+			byPartType.computeIfAbsent(partType, k -> new ArrayList<>()).add(requirement);
+		}
+
+		if (byPartType.size() == 1)
+		{
+			Map.Entry<String, List<TrackedRequirement>> only = byPartType.entrySet().iterator().next();
+			List<TrackedRequirement> variants = only.getValue();
+			String title = tier + " " + only.getKey();
+			String selectionKey = tier + "|" + only.getKey();
+			return buildOuterCard(title, requirements, variants.size() > 1
+				? buildVariantSection(selectionKey, variants)
+				: buildContent(variants.get(0)));
+		}
+
+		JPanel sections = new JPanel();
+		sections.setLayout(new BoxLayout(sections, BoxLayout.Y_AXIS));
+		sections.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		// Horizontal-only padding is skipped here since the outer card already insets its
+		// content 8px - adding more on top of that pushed everything nested (headers and
+		// requirement lines alike) noticeably further right than the card's own title.
+		sections.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+
+		boolean first = true;
+		for (Map.Entry<String, List<TrackedRequirement>> entry : byPartType.entrySet())
+		{
+			if (!first)
+			{
+				sections.add(Box.createVerticalStrut(6));
+				sections.add(divider());
+				sections.add(Box.createVerticalStrut(6));
+			}
+			first = false;
+
+			String partTypeKey = tier + "|" + entry.getKey();
+			sections.add(buildPartTypeSection(capitalize(entry.getKey()), partTypeKey, entry.getValue()));
+		}
+
+		return buildOuterCard(tier, requirements, sections);
+	}
+
+	/**
+	 * One part type within a multi-part-type tier (e.g. "Hull" under "Oak"): its name and
+	 * boat-size picker (if it has more than one variant) share a row, name on the left and
+	 * picker on the right, with the selected variant's content below.
+	 */
+	private JPanel buildPartTypeSection(String label, String selectionKey, List<TrackedRequirement> variants)
+	{
+		JLabel subHeader = new JLabel(label);
+		subHeader.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		subHeader.setFont(subHeader.getFont().deriveFont(Font.BOLD));
+
+		JPanel headerRow = new JPanel(new BorderLayout());
+		headerRow.setOpaque(false);
+		headerRow.add(subHeader, BorderLayout.WEST);
+
+		int savedIndex = 0;
+		JComboBox<String> variantPicker = null;
+		if (variants.size() > 1)
+		{
+			variantPicker = new JComboBox<>();
+			for (TrackedRequirement variant : variants)
+			{
+				variantPicker.addItem(variantLabel(variant.getPartName()));
+			}
+			savedIndex = selectedVariantIndex.getOrDefault(selectionKey, 0);
+			if (savedIndex >= variants.size())
+			{
+				savedIndex = 0;
+			}
+			variantPicker.setSelectedIndex(savedIndex);
+			headerRow.add(variantPicker, BorderLayout.EAST);
+		}
+
+		// A BorderLayout panel inside a BoxLayout(Y_AXIS) parent only claims its own content
+		// width by default, not the full row - stretch it explicitly so the picker actually
+		// lands at the far right edge instead of hugging the label.
+		headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		headerRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, headerRow.getPreferredSize().height));
+
+		JPanel section = new JPanel();
+		section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+		section.setOpaque(false);
+		section.setAlignmentX(Component.LEFT_ALIGNMENT);
+		section.add(headerRow);
+		section.add(Box.createVerticalStrut(4));
+		section.add(buildContent(variants.get(savedIndex)));
+
+		if (variantPicker != null)
+		{
+			JComboBox<String> picker = variantPicker;
+			// buildContent() reads live client state, which - like every RuneLite Client API
+			// call - asserts it's running on the client thread, not the AWT event thread this
+			// listener fires on.
+			picker.addActionListener(e -> clientThread.invoke(() ->
+			{
+				selectedVariantIndex.put(selectionKey, picker.getSelectedIndex());
+				refresh();
+			}));
+		}
+
+		return section;
+	}
+
+	/**
+	 * The outer card chrome (name, remove-everything-inside button) wrapping whatever content
+	 * panel is passed in - used for both plain single/grouped-by-boat-size cards and tier
+	 * cards, so all three levels share one consistent look.
+	 */
+	private JPanel buildOuterCard(String title, List<TrackedRequirement> allInside, JPanel content)
+	{
+		JPanel card = new JPanel(new BorderLayout(0, 4));
 		card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		card.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
 
-		JLabel name = new JLabel(requirement.getPartName());
+		JLabel name = new JLabel(title);
 		name.setForeground(ColorScheme.BRAND_ORANGE);
 
 		JButton remove = new JButton("x");
 		remove.setMargin(new java.awt.Insets(0, 4, 0, 4));
-		remove.addActionListener(e ->
+		remove.addActionListener(e -> clientThread.invoke(() ->
 		{
-			materialsManager.remove(requirement.getPartName());
+			for (TrackedRequirement requirement : allInside)
+			{
+				materialsManager.remove(requirement.getPartName());
+			}
 			refresh();
-		});
+		}));
 
 		JPanel cardHeader = new JPanel(new BorderLayout());
 		cardHeader.setOpaque(false);
 		cardHeader.add(name, BorderLayout.WEST);
 		cardHeader.add(remove, BorderLayout.EAST);
 
-		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		card.add(cardHeader, BorderLayout.NORTH);
+		card.add(content, BorderLayout.CENTER);
+		return card;
+	}
 
-		JPanel materialsGrid = new JPanel();
-		materialsGrid.setLayout(new BoxLayout(materialsGrid, BoxLayout.Y_AXIS));
-		materialsGrid.setOpaque(false);
-		for (RequiredMaterial material : requirement.getMaterials())
+	/**
+	 * A boat-size picker plus the currently-selected variant's content, for one part type that
+	 * has more than one boat-size variant tracked.
+	 */
+	private JPanel buildVariantSection(String selectionKey, List<TrackedRequirement> variants)
+	{
+		JComboBox<String> variantPicker = new JComboBox<>();
+		for (TrackedRequirement variant : variants)
 		{
-			materialsGrid.add(buildMaterialLine(material, bank));
+			variantPicker.addItem(variantLabel(variant.getPartName()));
+		}
+		int savedIndex = selectedVariantIndex.getOrDefault(selectionKey, 0);
+		if (savedIndex >= variants.size())
+		{
+			savedIndex = 0;
+		}
+		variantPicker.setSelectedIndex(savedIndex);
+
+		JPanel pickerRow = new JPanel(new BorderLayout());
+		pickerRow.setOpaque(false);
+		pickerRow.add(variantPicker, BorderLayout.WEST);
+
+		JPanel section = new JPanel();
+		section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+		section.setOpaque(false);
+		section.add(pickerRow);
+		section.add(Box.createVerticalStrut(4));
+		section.add(buildContent(variants.get(savedIndex)));
+
+		// buildContent() reads live client state (bank contents, skill levels), which - like
+		// every RuneLite Client API call - asserts it's running on the client thread, not
+		// whatever thread fired this Swing action event (the AWT event thread).
+		variantPicker.addActionListener(e -> clientThread.invoke(() ->
+		{
+			selectedVariantIndex.put(selectionKey, variantPicker.getSelectedIndex());
+			refresh();
+		}));
+
+		return section;
+	}
+
+	private JPanel buildContent(TrackedRequirement requirement)
+	{
+		JPanel content = new JPanel();
+		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+		content.setOpaque(false);
+
+		if (!requirement.getLevelRequirements().isEmpty())
+		{
+			for (String levelRequirement : requirement.getLevelRequirements())
+			{
+				content.add(buildLevelRequirementLine(levelRequirement));
+			}
+			content.add(Box.createVerticalStrut(6));
+			content.add(divider());
+			content.add(Box.createVerticalStrut(6));
 		}
 
-		card.add(cardHeader, BorderLayout.NORTH);
-		card.add(materialsGrid, BorderLayout.CENTER);
-		return card;
+		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		for (RequiredMaterial material : requirement.getMaterials())
+		{
+			content.add(buildMaterialLine(material, bank));
+		}
+
+		return content;
+	}
+
+	private JTextArea buildLevelRequirementLine(String levelRequirement)
+	{
+		Color color = ColorScheme.LIGHT_GRAY_COLOR;
+		Matcher matcher = LEVEL_REQUIREMENT_PATTERN.matcher(levelRequirement);
+		if (matcher.matches())
+		{
+			int requiredLevel = Integer.parseInt(matcher.group(1));
+			Skill skill = findSkillByName(matcher.group(2).trim());
+			if (skill != null && client.getRealSkillLevel(skill) >= requiredLevel)
+			{
+				color = COLOR_HAVE_ENOUGH;
+			}
+		}
+		return wrappedText("Requires: " + levelRequirement, color);
+	}
+
+	private Skill findSkillByName(String name)
+	{
+		for (Skill skill : Skill.values())
+		{
+			if (skill.getName().equalsIgnoreCase(name))
+			{
+				return skill;
+			}
+		}
+		return null;
 	}
 
 	private JTextArea buildMaterialLine(RequiredMaterial material, ItemContainer bank)
@@ -155,6 +480,15 @@ public class ShipMaterialsPanel extends PluginPanel
 
 		String text = material.getName() + " (" + have + "/" + need + ")";
 		return wrappedText(text, color);
+	}
+
+	private JPanel divider()
+	{
+		JPanel line = new JPanel();
+		line.setBackground(ColorScheme.MEDIUM_GRAY_COLOR);
+		line.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+		line.setPreferredSize(new Dimension(Integer.MAX_VALUE, 1));
+		return line;
 	}
 
 	/**
