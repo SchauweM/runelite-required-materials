@@ -16,7 +16,9 @@ repositories {
     mavenCentral()
 }
 
-def runeLiteVersion = 'latest.release'
+// -Puse.snapshot builds against RuneLite's integration builds, so upcoming breakage shows up
+// before it reaches a release.
+def runeLiteVersion = 'latest.' + (project.hasProperty('use.snapshot') ? 'integration' : 'release')
 def pluginMainClass = 'com.requiredmaterials.RequiredMaterialsPluginTest'
 
 dependencies {

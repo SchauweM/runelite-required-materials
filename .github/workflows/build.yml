@@ -47,3 +47,29 @@ jobs:
           name: test-results
           path: build/reports/tests/test/
           retention-days: 7
+
+  snapshot:
+    name: Build against upcoming RuneLite
+    runs-on: ubuntu-latest
+    # Advisory: a break here is RuneLite's next release, not this PR, so it must not block a
+    # merge. It's the early warning that the required build above will start failing.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build against latest.integration
+        run: ./gradlew build -Puse.snapshot --refresh-dependencies --stacktrace
+
+      - name: Report the snapshot version used
+        if: always()
+        run: ./gradlew -q dependencies --configuration compileClasspath -Puse.snapshot | grep -m1 'net.runelite:client' || true
