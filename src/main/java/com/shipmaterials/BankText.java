@@ -9,15 +9,17 @@ class BankText
 	final String text;
 	final int x;
 	final int y;
+	final int textColor;
 	final int spriteId;
 	final int spriteX;
 	final int spriteY;
 
-	BankText(String text, int x, int y, int spriteId, int spriteX, int spriteY)
+	BankText(String text, int x, int y, int textColor, int spriteId, int spriteX, int spriteY)
 	{
 		this.text = text;
 		this.x = x;
 		this.y = y;
+		this.textColor = textColor;
 		this.spriteId = spriteId;
 		this.spriteX = spriteX;
 		this.spriteY = spriteY;

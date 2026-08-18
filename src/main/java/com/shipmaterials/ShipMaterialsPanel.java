@@ -1,13 +1,18 @@
 package com.shipmaterials;
 
 import java.awt.BorderLayout;
-import java.awt.GridLayout;
+import java.awt.Color;
+import java.awt.Dimension;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JTextArea;
+import net.runelite.api.Client;
+import net.runelite.api.ItemContainer;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
@@ -18,12 +23,17 @@ import net.runelite.client.ui.PluginPanel;
  */
 public class ShipMaterialsPanel extends PluginPanel
 {
+	private static final Color COLOR_HAVE_ENOUGH = new Color(96, 220, 96);
+	private static final Color COLOR_HAVE_SOME = new Color(255, 165, 0);
+
 	private final MaterialsManager materialsManager;
+	private final Client client;
 	private final JPanel listContainer = new JPanel();
 
-	ShipMaterialsPanel(MaterialsManager materialsManager)
+	ShipMaterialsPanel(MaterialsManager materialsManager, Client client)
 	{
 		this.materialsManager = materialsManager;
+		this.client = client;
 
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -42,9 +52,15 @@ public class ShipMaterialsPanel extends PluginPanel
 		header.add(title, BorderLayout.WEST);
 		header.add(clearAll, BorderLayout.EAST);
 
+		JPanel top = new JPanel();
+		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
+		top.add(header);
+		top.add(Box.createVerticalStrut(4));
+		top.add(wrappedText("Open your bank to update quantities below.", ColorScheme.LIGHT_GRAY_COLOR));
+
 		listContainer.setLayout(new BoxLayout(listContainer, BoxLayout.Y_AXIS));
 
-		add(header, BorderLayout.NORTH);
+		add(top, BorderLayout.NORTH);
 		add(listContainer, BorderLayout.CENTER);
 	}
 
@@ -54,9 +70,9 @@ public class ShipMaterialsPanel extends PluginPanel
 
 		if (materialsManager.isEmpty())
 		{
-			JLabel empty = new JLabel("<html>Nothing tracked yet. Click a ship upgrade's requirements in-game to start tracking.</html>");
-			empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-			listContainer.add(empty);
+			listContainer.add(wrappedText(
+				"Nothing tracked yet. Click a ship upgrade's requirements in-game to start tracking.",
+				ColorScheme.LIGHT_GRAY_COLOR));
 		}
 		else
 		{
@@ -94,18 +110,70 @@ public class ShipMaterialsPanel extends PluginPanel
 		cardHeader.add(name, BorderLayout.WEST);
 		cardHeader.add(remove, BorderLayout.EAST);
 
-		JPanel materialsGrid = new JPanel(new GridLayout(0, 1));
+		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+
+		JPanel materialsGrid = new JPanel();
+		materialsGrid.setLayout(new BoxLayout(materialsGrid, BoxLayout.Y_AXIS));
 		materialsGrid.setOpaque(false);
 		for (RequiredMaterial material : requirement.getMaterials())
 		{
-			String suffix = material.getItemId() == null ? "  (item not found - check spelling)" : "";
-			JLabel line = new JLabel(material.getQuantity() + "x " + material.getName() + suffix);
-			line.setForeground(material.getItemId() == null ? ColorScheme.PROGRESS_ERROR_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
-			materialsGrid.add(line);
+			materialsGrid.add(buildMaterialLine(material, bank));
 		}
 
 		card.add(cardHeader, BorderLayout.NORTH);
 		card.add(materialsGrid, BorderLayout.CENTER);
 		return card;
+	}
+
+	private JTextArea buildMaterialLine(RequiredMaterial material, ItemContainer bank)
+	{
+		if (material.getItemId() == null)
+		{
+			String text = material.getQuantity() + "x " + material.getName() + " (couldn't find a matching item)";
+			return wrappedText(text, ColorScheme.PROGRESS_ERROR_COLOR);
+		}
+
+		int have = bank == null ? 0 : bank.count(material.getItemId());
+		int need = material.getQuantity();
+
+		// have == 0 covers two cases we can't tell apart - genuinely own none, or the bank
+		// just hasn't been opened this session yet - so it stays neutral gray either way
+		// rather than falsely flagging items you might actually already have.
+		Color color;
+		if (have >= need)
+		{
+			color = COLOR_HAVE_ENOUGH;
+		}
+		else if (have > 0)
+		{
+			color = COLOR_HAVE_SOME;
+		}
+		else
+		{
+			color = ColorScheme.LIGHT_GRAY_COLOR;
+		}
+
+		String text = material.getName() + " (" + have + "/" + need + ")";
+		return wrappedText(text, color);
+	}
+
+	/**
+	 * JLabel's HTML "width:Npx" wrapping trick clips instead of reflowing once the sidebar's
+	 * actual available width doesn't match the guessed pixel value - a JTextArea with real
+	 * line-wrap reflows against whatever width it's actually laid out at.
+	 */
+	private JTextArea wrappedText(String text, Color color)
+	{
+		JTextArea area = new JTextArea(text);
+		area.setEditable(false);
+		area.setFocusable(false);
+		area.setLineWrap(true);
+		area.setWrapStyleWord(true);
+		area.setOpaque(false);
+		area.setForeground(color);
+		area.setFont(new JLabel().getFont());
+		area.setBorder(null);
+		area.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+		return area;
 	}
 }

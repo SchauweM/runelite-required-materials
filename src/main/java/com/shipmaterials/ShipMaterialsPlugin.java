@@ -6,13 +6,16 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -31,6 +34,9 @@ public class ShipMaterialsPlugin extends Plugin
 {
 	@Inject
 	private Client client;
+
+	@Inject
+	private ClientThread clientThread;
 
 	@Inject
 	private ClientToolbar clientToolbar;
@@ -63,10 +69,17 @@ public class ShipMaterialsPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		materialsManager.load();
+		panel = new ShipMaterialsPanel(materialsManager, client);
 
-		panel = new ShipMaterialsPanel(materialsManager);
-		panel.refresh();
+		// Loading resolves item names to ids via the client's item definitions, which can
+		// only be read on the client thread - startUp() itself isn't guaranteed to be on it
+		// (e.g. when the plugin is toggled on from the config UI), so defer via ClientThread
+		// rather than crashing; invoke() runs synchronously if we're already on it.
+		clientThread.invoke(() ->
+		{
+			materialsManager.load();
+			panel.refresh();
+		});
 
 		navButton = NavigationButton.builder()
 			.tooltip("Ship Materials")
@@ -217,6 +230,15 @@ public class ShipMaterialsPlugin extends Plugin
 		else if (event.getGroupId() == InterfaceID.SKILL_GUIDE)
 		{
 			lastKnownGuideV1Title = null;
+		}
+	}
+
+	@Subscribe
+	public void onItemContainerChanged(ItemContainerChanged event)
+	{
+		if (event.getContainerId() == InventoryID.BANK && panel != null)
+		{
+			panel.refresh();
 		}
 	}
 

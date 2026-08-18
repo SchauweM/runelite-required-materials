@@ -5,6 +5,7 @@ import com.google.gson.reflect.TypeToken;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +18,8 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Client;
+import net.runelite.api.ItemComposition;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ItemManager;
 import net.runelite.http.api.item.ItemPrice;
@@ -53,6 +56,11 @@ public class MaterialsManager
 		{
 		}.getType();
 
+	private static final int MAX_ITEM_ID_SCAN = 35000;
+
+	@Inject
+	private Client client;
+
 	@Inject
 	private ConfigManager configManager;
 
@@ -63,6 +71,7 @@ public class MaterialsManager
 	private Gson gson;
 
 	private final Map<String, TrackedRequirement> requirements = new LinkedHashMap<>();
+	private Map<String, Integer> fullItemNameIndex;
 
 	@Value
 	public static class ParseResult
@@ -176,6 +185,9 @@ public class MaterialsManager
 
 	private Integer resolveItemId(String itemName)
 	{
+		// ItemManager#search only covers GE-tradeable items, so non-tradeable materials (e.g.
+		// ship furniture) never show up in it regardless of how new or old they are. Fall back
+		// to a full scan of the client's own item definitions, which covers every item.
 		List<ItemPrice> results = itemManager.search(itemName);
 		for (ItemPrice result : results)
 		{
@@ -184,6 +196,19 @@ public class MaterialsManager
 				return result.getId();
 			}
 		}
+
+		// getItemDefinition (used to build the full index) can only be called on the client
+		// thread - callers off that thread (e.g. plugin startUp() triggered by a config UI
+		// toggle) just skip this fallback rather than crashing.
+		if (client.isClientThread())
+		{
+			Integer fullIndexMatch = fullItemNameIndex().get(itemName.toLowerCase());
+			if (fullIndexMatch != null)
+			{
+				return fullIndexMatch;
+			}
+		}
+
 		if (!results.isEmpty())
 		{
 			log.debug("Ship materials: no exact name match for '{}', falling back to closest search result '{}'",
@@ -193,6 +218,29 @@ public class MaterialsManager
 
 		log.warn("Ship materials: could not resolve item id for '{}' - it won't be highlightable in the bank", itemName);
 		return null;
+	}
+
+	private Map<String, Integer> fullItemNameIndex()
+	{
+		if (fullItemNameIndex != null)
+		{
+			return fullItemNameIndex;
+		}
+
+		Map<String, Integer> index = new HashMap<>();
+		for (int id = 0; id < MAX_ITEM_ID_SCAN; id++)
+		{
+			ItemComposition composition = client.getItemDefinition(id);
+			String name = composition.getName();
+			if (name == null || name.isEmpty() || "null".equals(name))
+			{
+				continue;
+			}
+			index.putIfAbsent(name.toLowerCase(), composition.getId());
+		}
+
+		fullItemNameIndex = index;
+		return index;
 	}
 
 	public Collection<TrackedRequirement> getRequirements()

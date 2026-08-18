@@ -235,7 +235,7 @@ public class BankGroupedView
 
 		for (BankText bankText : bankItemTexts)
 		{
-			addedWidgets.add(createText(itemContainer, bankText.text, Color.WHITE.getRGB(),
+			addedWidgets.add(createText(itemContainer, bankText.text, bankText.textColor,
 				ITEM_HORIZONTAL_SPACING, TEXT_HEIGHT - 3, bankText.x, bankText.y));
 
 			if (bankText.spriteId != -1)
@@ -444,7 +444,6 @@ public class BankGroupedView
 			yPos = baseY + 9;
 		}
 
-		boolean hasEnough = currentQuantity >= goalQuantity;
 		int spritePosX = xPos + requirementLength + 10;
 		int spritePosY = yPos;
 		if (yPos != baseY - 1)
@@ -453,7 +452,8 @@ public class BankGroupedView
 			spritePosY = baseY - 1;
 		}
 
-		bankItemTexts.add(new BankText("/ " + quantityString, xPos, yPos,
+		boolean hasEnough = currentQuantity >= goalQuantity;
+		bankItemTexts.add(new BankText("/ " + quantityString, xPos, yPos, Color.WHITE.getRGB(),
 			hasEnough ? TICK_SPRITE_ID : CROSS_SPRITE_ID, spritePosX, spritePosY));
 	}
 
