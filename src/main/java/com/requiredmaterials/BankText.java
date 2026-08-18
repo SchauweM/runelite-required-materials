@@ -1,4 +1,4 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 /**
  * A pending "current / goal" quantity label (plus optional tick/cross sprite) queued up

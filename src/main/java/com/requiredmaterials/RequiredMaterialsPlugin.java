@@ -1,8 +1,12 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 import com.google.inject.Provides;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +26,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.SkillIconManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -30,11 +35,11 @@ import net.runelite.client.util.ImageUtil;
 
 @Slf4j
 @PluginDescriptor(
-	name = "Ship Materials",
-	description = "Tracks materials needed for sailing ship upgrades and highlights them in your bank",
-	tags = {"sailing", "ship", "bank", "materials"}
+	name = "Required Materials",
+	description = "Tracks materials needed for Sailing ship upgrades and Construction furniture, and highlights them in your bank",
+	tags = {"sailing", "construction", "ship", "bank", "materials"}
 )
-public class ShipMaterialsPlugin extends Plugin
+public class RequiredMaterialsPlugin extends Plugin
 {
 	@Inject
 	private Client client;
@@ -57,23 +62,27 @@ public class ShipMaterialsPlugin extends Plugin
 	@Inject
 	private ConfigManager configManager;
 
-	private ShipMaterialsPanel panel;
+	@Inject
+	private SkillIconManager skillIconManager;
+
+	private RequiredMaterialsPanel panel;
 	private NavigationButton navButton;
 	private boolean shipCustomisationOpen;
+	private boolean furnitureCreationOpen;
 	private String lastKnownGuideV2Title;
 	private String lastKnownGuideV1Title;
 	private String pendingContinuationPartName;
 
 	@Provides
-	ShipMaterialsConfig provideConfig(ConfigManager configManager)
+	RequiredMaterialsConfig provideConfig(ConfigManager configManager)
 	{
-		return configManager.getConfig(ShipMaterialsConfig.class);
+		return configManager.getConfig(RequiredMaterialsConfig.class);
 	}
 
 	@Override
 	protected void startUp()
 	{
-		panel = new ShipMaterialsPanel(materialsManager, client, clientThread);
+		panel = new RequiredMaterialsPanel(materialsManager, client, clientThread, skillIconManager);
 
 		// Loading resolves item names to ids via the client's item definitions, which can
 		// only be read on the client thread - startUp() itself isn't guaranteed to be on it
@@ -86,7 +95,7 @@ public class ShipMaterialsPlugin extends Plugin
 		});
 
 		navButton = NavigationButton.builder()
-			.tooltip("Ship Materials")
+			.tooltip("Required Materials")
 			.icon(ImageUtil.loadImageResource(getClass(), "icon.png"))
 			.priority(6)
 			.panel(panel)
@@ -110,7 +119,7 @@ public class ShipMaterialsPlugin extends Plugin
 			return;
 		}
 
-		if (!shipCustomisationOpen && !isSailingSkillGuideOpen())
+		if (!shipCustomisationOpen && !isTrackedSkillGuideOpen())
 		{
 			return;
 		}
@@ -142,7 +151,9 @@ public class ShipMaterialsPlugin extends Plugin
 		}
 
 		pendingContinuationPartName = result.isContinuationExpected() ? result.getPartName() : null;
-		log.debug("Ship materials: now tracking requirements for '{}'", result.getPartName());
+		log.debug("Required materials: now tracking requirements for '{}'", result.getPartName());
+
+		materialsManager.setSkill(result.getPartName(), currentSkillSource());
 
 		List<String> levelRequirements = findLevelRequirements(result.getPartName());
 		if (!levelRequirements.isEmpty())
@@ -159,6 +170,7 @@ public class ShipMaterialsPlugin extends Plugin
 	private static final int GUIDE_TOP_LEVEL_SLOT_SCAN = 40;
 	private static final Pattern DIGITS_ONLY = Pattern.compile("^\\d+$");
 	private static final Pattern BOAT_TYPE_SUFFIX = Pattern.compile("\\s*\\([^)]*\\)$");
+	private static final List<String> TRACKED_SKILLS = Arrays.asList("Sailing", "Construction");
 
 	private String stripBoatTypeSuffix(String partName)
 	{
@@ -167,16 +179,25 @@ public class ShipMaterialsPlugin extends Plugin
 
 	/**
 	 * Skill level requirements are never in the chat message. Each guide row shows the
-	 * required Sailing level as a separate plain-number widget to the left of the entry (the
-	 * only requirement for some rows, e.g. "Wooden cargo hold" has no other skill req at all),
-	 * and optionally a "<Part name><br>Requires: <col=...>Level N Skill</col>, ..." widget for
-	 * any additional skills (e.g. Construction). The two are siblings correlated by row (same
-	 * Y position), not by any parent/child or array-adjacency relationship.
+	 * required primary skill level as a separate plain-number widget to the left of the entry
+	 * (the only requirement for some rows, e.g. "Wooden cargo hold" has no other skill req at
+	 * all), and optionally a "<Part name><br>Requires: <col=...>Level N Skill</col>, ..." widget
+	 * for any additional skills (e.g. Construction alongside Sailing). The two are siblings
+	 * correlated by row (same Y position), not by any parent/child or array-adjacency
+	 * relationship.
 	 */
 	private List<String> findLevelRequirements(String partName)
 	{
 		for (int groupId : new int[] {InterfaceID.SKILL_GUIDE, InterfaceID.SKILL_GUIDE_V2})
 		{
+			String primarySkill = groupId == InterfaceID.SKILL_GUIDE_V2
+				? matchingTrackedSkill(lastKnownGuideV2Title, true)
+				: matchingTrackedSkill(lastKnownGuideV1Title, false);
+			if (primarySkill == null)
+			{
+				continue;
+			}
+
 			for (int childId = 0; childId <= GUIDE_TOP_LEVEL_SLOT_SCAN; childId++)
 			{
 				Widget w = client.getWidget(groupId, childId);
@@ -191,7 +212,7 @@ public class ShipMaterialsPlugin extends Plugin
 
 				for (Widget nameWidget : nameWidgets)
 				{
-					List<String> result = extractRequirements(nameWidget, partName, numberWidgets);
+					List<String> result = extractRequirements(nameWidget, partName, numberWidgets, primarySkill);
 					if (result != null)
 					{
 						return result;
@@ -200,6 +221,108 @@ public class ShipMaterialsPlugin extends Plugin
 			}
 		}
 		return new ArrayList<>();
+	}
+
+	private static final Pattern LEVEL_TEXT_PATTERN = Pattern.compile("^Level (\\d+)$", Pattern.CASE_INSENSITIVE);
+	private static final Pattern MATERIAL_LINE_PATTERN = Pattern.compile("^(.+?):\\s*(\\d+)$");
+	private static final Pattern TAG_PATTERN = Pattern.compile("<[^>]*>");
+
+	/**
+	 * Unlike ship upgrades, Furniture Creation gives everything needed for a click in one shot -
+	 * the clicked widget's own text (item name, required level, and a "Mat: Qty<br>..." materials
+	 * block, up to 3 slots padded with empty or flavour-text ones when unused) - so there's no
+	 * chat message to parse or multi-line list to reassemble.
+	 */
+	private void trackFurnitureItem(MenuOptionClicked event)
+	{
+		Widget itemWidget = event.getWidget();
+		if (itemWidget == null)
+		{
+			return;
+		}
+
+		String partName = TAG_PATTERN.matcher(event.getMenuTarget()).replaceAll("").trim();
+
+		List<Widget> texts = new ArrayList<>();
+		collectAllText(itemWidget, texts);
+
+		String levelText = null;
+		String materialsText = null;
+		for (Widget w : texts)
+		{
+			String t = w.getText().trim();
+			if (LEVEL_TEXT_PATTERN.matcher(t).matches())
+			{
+				levelText = t;
+			}
+			else if (t.contains("<br>"))
+			{
+				materialsText = t;
+			}
+		}
+
+		if (materialsText == null)
+		{
+			return;
+		}
+
+		Map<String, Integer> materials = new LinkedHashMap<>();
+		for (String segment : materialsText.split("<br>"))
+		{
+			// Unused material slots are padded with either nothing or flavour text describing
+			// the built item - neither matches "Name: Qty", so they're naturally skipped here.
+			Matcher m = MATERIAL_LINE_PATTERN.matcher(segment.trim());
+			if (m.matches())
+			{
+				materials.put(m.group(1).trim(), Integer.parseInt(m.group(2)));
+			}
+		}
+
+		if (materials.isEmpty())
+		{
+			return;
+		}
+
+		List<String> levelRequirements = new ArrayList<>();
+		if (levelText != null)
+		{
+			levelRequirements.add(levelText + " Construction");
+		}
+
+		materialsManager.trackDirect(partName, materials, levelRequirements);
+		materialsManager.setSkill(partName, "Construction");
+		if (panel != null)
+		{
+			panel.refresh();
+		}
+	}
+
+	private void collectAllText(Widget widget, List<Widget> out)
+	{
+		if (widget == null)
+		{
+			return;
+		}
+
+		if (widget.getText() != null && !widget.getText().isEmpty())
+		{
+			out.add(widget);
+		}
+
+		for (Widget[] childArray : new Widget[][] {widget.getChildren(), widget.getDynamicChildren(), widget.getStaticChildren()})
+		{
+			if (childArray == null)
+			{
+				continue;
+			}
+			for (Widget child : childArray)
+			{
+				if (child != null && child != widget)
+				{
+					collectAllText(child, out);
+				}
+			}
+		}
 	}
 
 	private void collectRowWidgets(Widget widget, List<Widget> numberWidgets, List<Widget> nameWidgets)
@@ -241,7 +364,7 @@ public class ShipMaterialsPlugin extends Plugin
 	/**
 	 * @return the requirement list if nameWidget is the row for partName, else null.
 	 */
-	private List<String> extractRequirements(Widget nameWidget, String partName, List<Widget> numberWidgets)
+	private List<String> extractRequirements(Widget nameWidget, String partName, List<Widget> numberWidgets, String primarySkill)
 	{
 		String text = nameWidget.getText();
 		int brIdx = text.indexOf("<br>");
@@ -260,7 +383,7 @@ public class ShipMaterialsPlugin extends Plugin
 		Widget sameRowNumber = findWidgetOnSameRow(nameWidget, numberWidgets);
 		if (sameRowNumber != null)
 		{
-			result.add("Level " + sameRowNumber.getText().trim() + " Sailing");
+			result.add("Level " + sameRowNumber.getText().trim() + " " + primarySkill);
 		}
 
 		int requiresIdx = text.indexOf("Requires:");
@@ -305,11 +428,43 @@ public class ShipMaterialsPlugin extends Plugin
 	 * either just being open, and check their title widgets instead. We check live rather than
 	 * caching an "open" flag, since the user can switch skills within an already-open guide.
 	 */
-	private boolean isSailingSkillGuideOpen()
+	private boolean isTrackedSkillGuideOpen()
 	{
 		refreshCachedGuideTitles();
-		return (lastKnownGuideV2Title != null && lastKnownGuideV2Title.startsWith("Sailing"))
-			|| "Sailing".equals(lastKnownGuideV1Title);
+		return matchingTrackedSkill(lastKnownGuideV2Title, true) != null
+			|| matchingTrackedSkill(lastKnownGuideV1Title, false) != null;
+	}
+
+	private String matchingTrackedSkill(String title, boolean prefixMatch)
+	{
+		if (title == null)
+		{
+			return null;
+		}
+		for (String skill : TRACKED_SKILLS)
+		{
+			if (prefixMatch ? title.startsWith(skill) : skill.equals(title))
+			{
+				return skill;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Which skill a just-tracked chat message came from: whichever guide is currently open, if
+	 * any (guide titles are refreshed as a side effect of {@link #isTrackedSkillGuideOpen()},
+	 * already called earlier in the same event) - otherwise SAILING_CUSTOMISATION must be what
+	 * triggered it, since that's a Sailing-only interface.
+	 */
+	private String currentSkillSource()
+	{
+		String skill = matchingTrackedSkill(lastKnownGuideV2Title, true);
+		if (skill == null)
+		{
+			skill = matchingTrackedSkill(lastKnownGuideV1Title, false);
+		}
+		return skill != null ? skill : "Sailing";
 	}
 
 	private void refreshCachedGuideTitles()
@@ -364,6 +519,10 @@ public class ShipMaterialsPlugin extends Plugin
 		{
 			shipCustomisationOpen = true;
 		}
+		else if (event.getGroupId() == InterfaceID.POH_FURNITURE_CREATION)
+		{
+			furnitureCreationOpen = true;
+		}
 	}
 
 	@Subscribe
@@ -376,6 +535,10 @@ public class ShipMaterialsPlugin extends Plugin
 		else if (event.getGroupId() == InterfaceID.SAILING_CUSTOMISATION)
 		{
 			shipCustomisationOpen = false;
+		}
+		else if (event.getGroupId() == InterfaceID.POH_FURNITURE_CREATION)
+		{
+			furnitureCreationOpen = false;
 		}
 		else if (event.getGroupId() == InterfaceID.SKILL_GUIDE_V2)
 		{
@@ -426,5 +589,10 @@ public class ShipMaterialsPlugin extends Plugin
 	public void onMenuOptionClicked(MenuOptionClicked event)
 	{
 		bankGroupedView.onMenuOptionClicked(event);
+
+		if (furnitureCreationOpen && "Build".equals(event.getMenuOption()))
+		{
+			trackFurnitureItem(event);
+		}
 	}
 }

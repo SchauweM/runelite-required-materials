@@ -1,4 +1,4 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
@@ -26,18 +26,25 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.http.api.item.ItemPrice;
 
 /**
- * Parses the ship-upgrade "materials:" chat message, keeps a running set of what's
- * being tracked (keyed by part name so re-clicking a requirement just replaces it),
- * resolves item names to ids via {@link ItemManager}, and persists across sessions.
+ * Keeps a running set of tracked requirements (keyed by part name so re-tracking one just
+ * replaces it), resolves item names to ids via {@link ItemManager}, and persists across
+ * sessions.
  *
- * Two different in-game sources send this kind of message, in two different item orderings:
+ * Requirements reach this class via two different paths depending on where they were tracked
+ * from. Ship upgrades (and Construction skill guide clicks) send a "materials:" chat message -
+ * two different in-game sources use it, in two different item orderings:
  * - Ship upgrade requirements: "Oak mast and linen sail materials: Oak logs x5, Iron nails x 20, Bolt of linen x5."
  * - Skill info menu part clicks: "Oak cargo hold: 8 x Oak plank, 32 x Iron nails"
  *
- * Long item lists get split by the client across multiple chat lines, with the continuation
- * line carrying no "part name:" prefix - just raw items. {@link #tryParseAndTrack} reports
- * whether its message ended mid-list (trailing comma) via {@link ParseResult#isContinuationExpected()};
- * the caller then routes the next unlabelled message to {@link #tryAppendContinuation}.
+ * Long item lists get split by the client across multiple chat lines at an arbitrary point (not
+ * necessarily a punctuation boundary), with the continuation line carrying no "part name:"
+ * prefix - just raw items. {@link #tryParseAndTrack} reports whether its message is still
+ * incomplete via {@link ParseResult#isContinuationExpected()}; the caller then routes the next
+ * unlabelled message to {@link #tryAppendContinuation}.
+ *
+ * Construction's Furniture Creation menu instead gives everything (name, materials, level) in
+ * one widget read with nothing split across messages, so it tracks directly via
+ * {@link #trackDirect}.
  */
 @Slf4j
 @Singleton
@@ -143,6 +150,30 @@ public class MaterialsManager
 	}
 
 	/**
+	 * Tracks a requirement whose name, materials and level requirements were all read directly
+	 * from a widget in one shot (e.g. the Furniture Creation menu) rather than pieced together
+	 * from chat messages - so unlike {@link #tryParseAndTrack}, there's no accumulation or
+	 * completeness check needed here.
+	 */
+	public void trackDirect(String partName, Map<String, Integer> materialQuantities, List<String> levelRequirements)
+	{
+		List<RequiredMaterial> materials = new ArrayList<>();
+		for (Map.Entry<String, Integer> entry : materialQuantities.entrySet())
+		{
+			RequiredMaterial material = new RequiredMaterial(entry.getKey(), entry.getValue());
+			material.setItemId(resolveItemId(entry.getKey()));
+			materials.add(material);
+		}
+
+		TrackedRequirement requirement = new TrackedRequirement(partName, materials);
+		requirement.setLevelRequirements(levelRequirements);
+
+		requirements.remove(partName);
+		requirements.put(partName, requirement);
+		save();
+	}
+
+	/**
 	 * Long item lists get split across chat lines by the client wherever the raw text happens
 	 * to reach its length limit - mid-word, mid-number, mid-tag - not at any punctuation
 	 * boundary, so the split point itself carries no marker. Raw text is buffered here across
@@ -240,7 +271,7 @@ public class MaterialsManager
 			}
 			else
 			{
-				log.debug("Ship materials: couldn't parse requirement segment '{}' from message '{}'", entry, messageForLogging);
+				log.debug("Required materials: couldn't parse requirement segment '{}' from message '{}'", entry, messageForLogging);
 				continue;
 			}
 
@@ -279,12 +310,12 @@ public class MaterialsManager
 
 		if (!results.isEmpty())
 		{
-			log.debug("Ship materials: no exact name match for '{}', falling back to closest search result '{}'",
+			log.debug("Required materials: no exact name match for '{}', falling back to closest search result '{}'",
 				itemName, results.get(0).getName());
 			return results.get(0).getId();
 		}
 
-		log.warn("Ship materials: could not resolve item id for '{}' - it won't be highlightable in the bank", itemName);
+		log.warn("Required materials: could not resolve item id for '{}' - it won't be highlightable in the bank", itemName);
 		return null;
 	}
 
@@ -322,6 +353,17 @@ public class MaterialsManager
 		if (requirement != null)
 		{
 			requirement.setLevelRequirements(levelRequirements);
+			save();
+		}
+	}
+
+	public void setSkill(String partName, String skill)
+	{
+		TrackedRequirement requirement = requirements.get(partName);
+		if (requirement != null)
+		{
+			requirement.setSkill(skill);
+			save();
 		}
 	}
 
@@ -364,14 +406,14 @@ public class MaterialsManager
 			List<SavedMaterial> materials = requirement.getMaterials().stream()
 				.map(m -> new SavedMaterial(m.getName(), m.getQuantity()))
 				.collect(Collectors.toList());
-			toSave.put(requirement.getPartName(), new SavedRequirement(materials, requirement.getLevelRequirements()));
+			toSave.put(requirement.getPartName(), new SavedRequirement(materials, requirement.getLevelRequirements(), requirement.getSkill()));
 		}
-		configManager.setConfiguration(ShipMaterialsConfig.GROUP, CONFIG_KEY_TRACKED, gson.toJson(toSave));
+		configManager.setConfiguration(RequiredMaterialsConfig.GROUP, CONFIG_KEY_TRACKED, gson.toJson(toSave));
 	}
 
 	public void load()
 	{
-		String json = configManager.getConfiguration(ShipMaterialsConfig.GROUP, CONFIG_KEY_TRACKED);
+		String json = configManager.getConfiguration(RequiredMaterialsConfig.GROUP, CONFIG_KEY_TRACKED);
 		if (json == null || json.isEmpty())
 		{
 			return;
@@ -398,6 +440,7 @@ public class MaterialsManager
 			{
 				requirement.setLevelRequirements(entry.getValue().levelRequirements);
 			}
+			requirement.setSkill(entry.getValue().skill);
 			requirements.put(entry.getKey(), requirement);
 		}
 	}
@@ -424,7 +467,7 @@ public class MaterialsManager
 			Map<String, SavedRequirement> migrated = new LinkedHashMap<>();
 			for (Map.Entry<String, List<SavedMaterial>> entry : legacy.entrySet())
 			{
-				migrated.put(entry.getKey(), new SavedRequirement(entry.getValue(), new ArrayList<>()));
+				migrated.put(entry.getKey(), new SavedRequirement(entry.getValue(), new ArrayList<>(), null));
 			}
 			return migrated;
 		}
@@ -434,11 +477,13 @@ public class MaterialsManager
 	{
 		List<SavedMaterial> materials;
 		List<String> levelRequirements;
+		String skill;
 
-		SavedRequirement(List<SavedMaterial> materials, List<String> levelRequirements)
+		SavedRequirement(List<SavedMaterial> materials, List<String> levelRequirements, String skill)
 		{
 			this.materials = materials;
 			this.levelRequirements = levelRequirements;
+			this.skill = skill;
 		}
 	}
 

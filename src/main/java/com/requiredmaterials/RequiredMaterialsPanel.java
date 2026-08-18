@@ -1,9 +1,18 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,6 +22,7 @@ import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
@@ -23,6 +33,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.Skill;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.game.SkillIconManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
@@ -36,29 +47,34 @@ import net.runelite.client.ui.PluginPanel;
  * requirements but grouped under one card with a picker, rather than shown as unrelated-looking
  * duplicate entries.
  */
-public class ShipMaterialsPanel extends PluginPanel
+public class RequiredMaterialsPanel extends PluginPanel
 {
 	private static final Color COLOR_HAVE_ENOUGH = new Color(96, 220, 96);
 	private static final Color COLOR_HAVE_SOME = new Color(255, 165, 0);
 	private static final Pattern LEVEL_REQUIREMENT_PATTERN = Pattern.compile("^Level (\\d+) (.+)$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern VARIANT_SUFFIX = Pattern.compile("^(.*?)\\s*\\(([^)]*)\\)$");
+	private static final List<String> SKILL_DISPLAY_ORDER = Arrays.asList("Sailing", "Construction");
+	private static final String UNKNOWN_SKILL = "Other";
 
 	private final MaterialsManager materialsManager;
 	private final Client client;
 	private final ClientThread clientThread;
+	private final SkillIconManager skillIconManager;
 	private final JPanel listContainer = new JPanel();
 	private final Map<String, Integer> selectedVariantIndex = new HashMap<>();
+	private final Map<String, Boolean> skillExpanded = new HashMap<>();
 
-	ShipMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread)
+	RequiredMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread, SkillIconManager skillIconManager)
 	{
 		this.materialsManager = materialsManager;
 		this.client = client;
 		this.clientThread = clientThread;
+		this.skillIconManager = skillIconManager;
 
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-		JLabel title = new JLabel("Tracked ship materials");
+		JLabel title = new JLabel("Required Materials");
 		title.setForeground(ColorScheme.BRAND_ORANGE);
 
 		JButton clearAll = new JButton("Clear all");
@@ -91,7 +107,7 @@ public class ShipMaterialsPanel extends PluginPanel
 		if (materialsManager.isEmpty())
 		{
 			listContainer.add(wrappedText(
-				"Nothing tracked yet. Click a ship upgrade's requirements in-game to start tracking.",
+				"Nothing tracked yet. Click a ship upgrade's requirements, a Furniture Creation item, or any item in the Sailing or Construction skill guide in-game to start tracking.",
 				ColorScheme.LIGHT_GRAY_COLOR));
 		}
 		else
@@ -103,19 +119,123 @@ public class ShipMaterialsPanel extends PluginPanel
 					.add(requirement);
 			}
 
+			Map<String, List<Map.Entry<String, List<TrackedRequirement>>>> bySkill = new LinkedHashMap<>();
 			for (Map.Entry<String, List<TrackedRequirement>> entry : byPart.entrySet())
 			{
-				List<TrackedRequirement> variants = entry.getValue();
-				listContainer.add(variants.size() > 1
-					? buildOuterCard(capitalize(entry.getKey()), variants, buildVariantSection(entry.getKey(), variants))
-					: buildOuterCard(variants.get(0).getPartName(), variants,
-						buildContent(variants.get(0))));
+				String skill = entry.getValue().get(0).getSkill();
+				bySkill.computeIfAbsent(skill != null ? skill : UNKNOWN_SKILL, k -> new ArrayList<>()).add(entry);
+			}
+
+			List<String> orderedSkills = new ArrayList<>(SKILL_DISPLAY_ORDER);
+			for (String skill : bySkill.keySet())
+			{
+				if (!orderedSkills.contains(skill))
+				{
+					orderedSkills.add(skill);
+				}
+			}
+
+			boolean firstShown = true;
+			for (String skill : orderedSkills)
+			{
+				List<Map.Entry<String, List<TrackedRequirement>>> groups = bySkill.get(skill);
+				if (groups == null || groups.isEmpty())
+				{
+					continue;
+				}
+				listContainer.add(buildAccordion(skill, groups, firstShown));
 				listContainer.add(Box.createVerticalStrut(6));
+				firstShown = false;
 			}
 		}
 
 		listContainer.revalidate();
 		listContainer.repaint();
+	}
+
+	private JPanel buildAccordion(String skill, List<Map.Entry<String, List<TrackedRequirement>>> groups, boolean defaultExpanded)
+	{
+		boolean expanded = skillExpanded.computeIfAbsent(skill, k -> defaultExpanded);
+
+		JLabel arrow = new JLabel(expanded ? "-" : "+");
+		arrow.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		arrow.setFont(arrow.getFont().deriveFont(Font.BOLD));
+		arrow.setPreferredSize(new Dimension(12, arrow.getPreferredSize().height));
+
+		JLabel skillLabel = new JLabel(skill);
+		skillLabel.setForeground(ColorScheme.BRAND_ORANGE);
+		skillLabel.setFont(skillLabel.getFont().deriveFont(Font.BOLD));
+
+		Skill skillEnum = findSkillByName(skill);
+		JLabel skillIcon = skillEnum != null
+			? new JLabel(new ImageIcon(skillIconManager.getSkillImage(skillEnum, true)))
+			: null;
+
+		JPanel headerLabels = new JPanel();
+		headerLabels.setLayout(new BoxLayout(headerLabels, BoxLayout.X_AXIS));
+		headerLabels.setOpaque(false);
+		headerLabels.add(arrow);
+		headerLabels.add(Box.createHorizontalStrut(6));
+		if (skillIcon != null)
+		{
+			headerLabels.add(skillIcon);
+			headerLabels.add(Box.createHorizontalStrut(4));
+		}
+		headerLabels.add(skillLabel);
+
+		JPanel header = new JPanel(new BorderLayout());
+		header.setOpaque(true);
+		header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		header.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+		header.add(headerLabels, BorderLayout.WEST);
+		header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		header.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		MouseAdapter toggleListener = new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				clientThread.invoke(() ->
+				{
+					skillExpanded.put(skill, !skillExpanded.getOrDefault(skill, defaultExpanded));
+					refresh();
+				});
+			}
+		};
+		for (Component c : new Component[] {header, headerLabels, arrow, skillLabel, skillIcon})
+		{
+			if (c != null)
+			{
+				c.addMouseListener(toggleListener);
+			}
+		}
+
+		JPanel wrapper = new JPanel(new GridBagLayout());
+		wrapper.setOpaque(false);
+		wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		GridBagConstraints gbc = new GridBagConstraints();
+		gbc.gridx = 0;
+		gbc.gridy = 0;
+		gbc.weightx = 1.0;
+		gbc.fill = GridBagConstraints.HORIZONTAL;
+		wrapper.add(header, gbc);
+
+		if (expanded)
+		{
+			for (Map.Entry<String, List<TrackedRequirement>> entry : groups)
+			{
+				List<TrackedRequirement> variants = entry.getValue();
+				gbc.gridy++;
+				gbc.insets = new Insets(6, 0, 0, 0);
+				wrapper.add(variants.size() > 1
+					? buildOuterCard(capitalize(entry.getKey()), variants, buildVariantSection(entry.getKey(), variants))
+					: buildOuterCard(variants.get(0).getPartName(), variants, buildContent(variants.get(0))), gbc);
+			}
+		}
+
+		return wrapper;
 	}
 
 	private String variantBaseName(String partName)
@@ -163,8 +283,7 @@ public class ShipMaterialsPanel extends PluginPanel
 
 	/**
 	 * The outer card chrome (name, remove-everything-inside button) wrapping whatever content
-	 * panel is passed in - used for both plain single/grouped-by-boat-size cards and tier
-	 * cards, so all three levels share one consistent look.
+	 * panel is passed in - shared by both plain single cards and grouped-by-variant cards.
 	 */
 	private JPanel buildOuterCard(String title, List<TrackedRequirement> allInside, JPanel content)
 	{

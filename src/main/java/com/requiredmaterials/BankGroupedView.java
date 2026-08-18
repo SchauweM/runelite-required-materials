@@ -1,4 +1,4 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 import java.awt.Color;
 import java.util.ArrayList;
@@ -30,15 +30,12 @@ import net.runelite.client.plugins.bank.BankSearch;
 import net.runelite.client.util.QuantityFormatter;
 
 /**
- * Reorganises the bank's item grid to show tracked ship-material requirements grouped by
- * part, at the top of the bank, exactly like Quest Helper's per-quest bank tab - just grouped
- * by tracked requirement (part) instead of by quest step. Adapted from Quest Helper's
- * QuestBankTab/QuestBankTabInterface (Zoinkwiz/quest-helper, BSD-2-Clause), which reuses the
- * bank's own real item-slot widgets as generic positionable slots rather than drawing a
- * separate overlay: the trick is hooking net.runelite.api.ScriptID#BANKMAIN_FINISHBUILDING,
- * the same script the game itself uses to build the bank grid every time it changes, and
- * overwriting its output afterward when the grouped view is active. When it's not active we
- * simply don't touch anything post-build, so the real bank view is untouched.
+ * Reorganises the bank's item grid to show tracked material requirements grouped by part, at
+ * the top of the bank. Reuses the bank's own real item-slot widgets as generic positionable
+ * slots rather than drawing a separate overlay, by hooking {@link ScriptID#BANKMAIN_FINISHBUILDING}
+ * - the same script the game itself uses to build the bank grid every time it changes - and
+ * overwriting its output afterward when the grouped view is active. When it's not active
+ * nothing is touched post-build, so the real bank view is untouched.
  */
 @Slf4j
 @Singleton
