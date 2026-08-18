@@ -158,6 +158,10 @@ public class MaterialsManager
 			return null;
 		}
 
+		// A plain LinkedHashMap keeps a re-put key's original position rather than moving it to
+		// the end, so re-tracking an already-tracked part (e.g. re-clicking it) wouldn't bump it
+		// to the bottom without explicitly removing it first.
+		requirements.remove(partName);
 		requirements.put(partName, new TrackedRequirement(partName, materials));
 		save();
 		return new ParseResult(partName, false);
