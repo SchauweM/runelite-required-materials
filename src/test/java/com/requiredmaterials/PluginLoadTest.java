@@ -87,5 +87,11 @@ public class PluginLoadTest
 		PluginDescriptor descriptor = pluginClass.getAnnotation(PluginDescriptor.class);
 		assertEquals("hub display name and in-client name should agree",
 			manifest.getProperty("displayName").trim(), descriptor.name());
+
+		// Optional to the hub, but without it the listing shows a commit hash as the version.
+		String version = manifest.getProperty("version");
+		assertNotNull("manifest needs a version, or the hub falls back to the commit hash", version);
+		assertTrue("version should look like 1.2.3, was: " + version,
+			version.trim().matches("\\d+\\.\\d+\\.\\d+"));
 	}
 }
