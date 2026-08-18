@@ -1,6 +1,7 @@
 package com.shipmaterials;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -52,6 +53,13 @@ public class MaterialsManager
 	private static final String CONFIG_KEY_TRACKED = "tracked";
 
 	private static final Type SAVE_TYPE =
+		new TypeToken<LinkedHashMap<String, SavedRequirement>>()
+		{
+		}.getType();
+
+	// Config saved before level requirements existed stored each part as a bare materials
+	// array - kept around purely so load() can fall back to it instead of losing old data.
+	private static final Type LEGACY_SAVE_TYPE =
 		new TypeToken<LinkedHashMap<String, List<SavedMaterial>>>()
 		{
 		}.getType();
@@ -350,13 +358,13 @@ public class MaterialsManager
 
 	public void save()
 	{
-		Map<String, List<SavedMaterial>> toSave = new LinkedHashMap<>();
+		Map<String, SavedRequirement> toSave = new LinkedHashMap<>();
 		for (TrackedRequirement requirement : requirements.values())
 		{
-			List<SavedMaterial> saved = requirement.getMaterials().stream()
+			List<SavedMaterial> materials = requirement.getMaterials().stream()
 				.map(m -> new SavedMaterial(m.getName(), m.getQuantity()))
 				.collect(Collectors.toList());
-			toSave.put(requirement.getPartName(), saved);
+			toSave.put(requirement.getPartName(), new SavedRequirement(materials, requirement.getLevelRequirements()));
 		}
 		configManager.setConfiguration(ShipMaterialsConfig.GROUP, CONFIG_KEY_TRACKED, gson.toJson(toSave));
 	}
@@ -369,23 +377,68 @@ public class MaterialsManager
 			return;
 		}
 
-		Map<String, List<SavedMaterial>> saved = gson.fromJson(json, SAVE_TYPE);
+		Map<String, SavedRequirement> saved = parseSaved(json);
 		if (saved == null)
 		{
 			return;
 		}
 
 		requirements.clear();
-		for (Map.Entry<String, List<SavedMaterial>> entry : saved.entrySet())
+		for (Map.Entry<String, SavedRequirement> entry : saved.entrySet())
 		{
 			List<RequiredMaterial> materials = new ArrayList<>();
-			for (SavedMaterial savedMaterial : entry.getValue())
+			for (SavedMaterial savedMaterial : entry.getValue().materials)
 			{
 				RequiredMaterial material = new RequiredMaterial(savedMaterial.name, savedMaterial.quantity);
 				material.setItemId(resolveItemId(savedMaterial.name));
 				materials.add(material);
 			}
-			requirements.put(entry.getKey(), new TrackedRequirement(entry.getKey(), materials));
+			TrackedRequirement requirement = new TrackedRequirement(entry.getKey(), materials);
+			if (entry.getValue().levelRequirements != null)
+			{
+				requirement.setLevelRequirements(entry.getValue().levelRequirements);
+			}
+			requirements.put(entry.getKey(), requirement);
+		}
+	}
+
+	/**
+	 * Config saved before level requirements were persisted stored each part as a bare
+	 * materials array instead of a {@link SavedRequirement} object, which fails to parse
+	 * against the current shape - falls back to the old shape rather than losing everything
+	 * that was already tracked.
+	 */
+	private Map<String, SavedRequirement> parseSaved(String json)
+	{
+		try
+		{
+			return gson.fromJson(json, SAVE_TYPE);
+		}
+		catch (JsonSyntaxException e)
+		{
+			Map<String, List<SavedMaterial>> legacy = gson.fromJson(json, LEGACY_SAVE_TYPE);
+			if (legacy == null)
+			{
+				return null;
+			}
+			Map<String, SavedRequirement> migrated = new LinkedHashMap<>();
+			for (Map.Entry<String, List<SavedMaterial>> entry : legacy.entrySet())
+			{
+				migrated.put(entry.getKey(), new SavedRequirement(entry.getValue(), new ArrayList<>()));
+			}
+			return migrated;
+		}
+	}
+
+	private static class SavedRequirement
+	{
+		List<SavedMaterial> materials;
+		List<String> levelRequirements;
+
+		SavedRequirement(List<SavedMaterial> materials, List<String> levelRequirements)
+		{
+			this.materials = materials;
+			this.levelRequirements = levelRequirements;
 		}
 	}
 
