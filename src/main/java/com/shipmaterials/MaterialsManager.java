@@ -71,6 +71,7 @@ public class MaterialsManager
 	private Gson gson;
 
 	private final Map<String, TrackedRequirement> requirements = new LinkedHashMap<>();
+	private final Map<String, String> pendingRawMaterialsText = new LinkedHashMap<>();
 	private Map<String, Integer> fullItemNameIndex;
 
 	@Value
@@ -81,22 +82,77 @@ public class MaterialsManager
 	}
 
 	/**
-	 * @return the parse result if the message matched and was tracked, otherwise null.
+	 * @return the parse result if the message matched, otherwise null. If the item list was
+	 * split across further chat lines, nothing is tracked yet and continuationExpected is true.
 	 */
 	public ParseResult tryParseAndTrack(String rawMessage)
 	{
-		String message = normalize(rawMessage);
-		Matcher requirementMatcher = REQUIREMENT_PATTERN.matcher(message);
+		Matcher requirementMatcher = REQUIREMENT_PATTERN.matcher(rawMessage);
 		if (!requirementMatcher.matches())
 		{
 			return null;
 		}
 
-		String partName = requirementMatcher.group(1).trim();
-		String materialsList = stripTrailingPeriod(requirementMatcher.group(2).trim());
+		String partName = normalize(requirementMatcher.group(1)).trim();
+		return accumulate(partName, requirementMatcher.group(2).trim());
+	}
 
-		boolean continuationExpected = materialsList.endsWith(",");
-		List<RequiredMaterial> materials = parseMaterialList(materialsList, message);
+	/**
+	 * @return the parse result if this completed or extended a pending item list, otherwise
+	 * null (e.g. nothing is pending for this part).
+	 */
+	public ParseResult tryAppendContinuation(String partName, String rawMessage)
+	{
+		String pending = pendingRawMaterialsText.get(partName);
+		if (pending == null)
+		{
+			return null;
+		}
+
+		return accumulate(partName, join(pending, rawMessage.trim()));
+	}
+
+	/**
+	 * The client's line-wrap breaks a message at a space and drops that space rather than
+	 * leaving it on either side - confirmed by capturing a real split ("...10000 x Air" /
+	 * "rune, ...", both fragments landing flush against the break with no space anywhere), which
+	 * without this glues into the wrong item name ("Airrune" instead of "Air rune"). Restored
+	 * only between two letters, since that's the only place gluing without a space actually
+	 * changes meaning - digits never have internal spaces to lose, and a dropped space next to
+	 * punctuation (e.g. a comma boundary) already reads fine once entries are comma-split and
+	 * trimmed.
+	 */
+	private String join(String pending, String continuation)
+	{
+		String pendingContent = TAG_PATTERN.matcher(pending).replaceAll("");
+		String continuationContent = TAG_PATTERN.matcher(continuation).replaceAll("");
+
+		char lastChar = pendingContent.isEmpty() ? ' ' : pendingContent.charAt(pendingContent.length() - 1);
+		char firstChar = continuationContent.isEmpty() ? ' ' : continuationContent.charAt(0);
+
+		boolean droppedSpace = Character.isLetter(lastChar) && Character.isLetter(firstChar);
+		return droppedSpace ? pending + " " + continuation : pending + continuation;
+	}
+
+	/**
+	 * Long item lists get split across chat lines by the client wherever the raw text happens
+	 * to reach its length limit - mid-word, mid-number, mid-tag - not at any punctuation
+	 * boundary, so the split point itself carries no marker. Raw text is buffered here across
+	 * calls (tags and all) and only parsed once {@link #isComplete} says the accumulated text
+	 * isn't missing anything, which avoids ever having to patch up an item that turns out to
+	 * have been split mid-name.
+	 */
+	private ParseResult accumulate(String partName, String rawMaterialsText)
+	{
+		if (!isComplete(rawMaterialsText))
+		{
+			pendingRawMaterialsText.put(partName, rawMaterialsText);
+			return new ParseResult(partName, true);
+		}
+
+		pendingRawMaterialsText.remove(partName);
+		String materialsList = stripTrailingPeriod(normalize(rawMaterialsText));
+		List<RequiredMaterial> materials = parseMaterialList(materialsList, materialsList);
 		if (materials.isEmpty())
 		{
 			return null;
@@ -104,32 +160,32 @@ public class MaterialsManager
 
 		requirements.put(partName, new TrackedRequirement(partName, materials));
 		save();
-		return new ParseResult(partName, continuationExpected);
+		return new ParseResult(partName, false);
 	}
 
 	/**
-	 * @return the parse result if any items were appended to an already-tracked part,
-	 * otherwise null (e.g. the part isn't tracked, or nothing in the message parsed).
+	 * Item lists come in two shapes: plain text terminated by a period (ship upgrade
+	 * requirements), or a run of "&lt;col=...&gt;item&lt;/col&gt;" spans with no terminating
+	 * punctuation at all (skill guide part clicks). For the second shape the only reliable
+	 * truncation marker is whether the split landed inside the last opened span - a
+	 * continuation always resumes with a fresh "&lt;col=...&gt;" of its own rather than closing
+	 * off the previous message's dangling one, so checking for balanced tag counts overall
+	 * doesn't work, only whether the last-opened one specifically got closed.
 	 */
-	public ParseResult tryAppendContinuation(String partName, String rawMessage)
+	private boolean isComplete(String rawMaterialsText)
 	{
-		TrackedRequirement existing = requirements.get(partName);
-		if (existing == null)
+		String trimmed = rawMaterialsText.trim();
+		if (trimmed.endsWith("."))
 		{
-			return null;
+			return true;
 		}
 
-		String message = stripTrailingPeriod(normalize(rawMessage));
-		boolean continuationExpected = message.endsWith(",");
-		List<RequiredMaterial> appended = parseMaterialList(message, message);
-		if (appended.isEmpty())
+		int lastOpenTag = trimmed.lastIndexOf("<col=");
+		if (lastOpenTag == -1)
 		{
-			return null;
+			return false;
 		}
-
-		existing.getMaterials().addAll(appended);
-		save();
-		return new ParseResult(partName, continuationExpected);
+		return trimmed.indexOf("</col>", lastOpenTag) != -1;
 	}
 
 	private String normalize(String rawMessage)
