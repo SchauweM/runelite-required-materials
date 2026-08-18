@@ -36,7 +36,9 @@ public class WikiRecipeService
 {
 	private static final String API_URL = "https://oldschool.runescape.wiki/api.php?action=parse&prop=wikitext&format=json&page=";
 	private static final String USER_AGENT = "RequiredMaterials-RuneLite-Plugin/1.0";
-	private static final Pattern DISAMBIG_LINK_PATTERN = Pattern.compile("\\[\\[([^\\]|]+)");
+	// Disambiguation pages link either as plain wikilinks or through the plink/ilink templates.
+	private static final Pattern DISAMBIG_LINK_PATTERN =
+		Pattern.compile("(?:\\[\\[|\\{\\{(?:plink|ilink)\\|)([^\\]|}]+)");
 
 	@Inject
 	private OkHttpClient okHttpClient;
@@ -55,10 +57,35 @@ public class WikiRecipeService
 	}
 
 	/**
-	 * Callback fires on OkHttp's thread, never the client thread - callers must hop back via
-	 * ClientThread before touching any Client API.
+	 * Tries each candidate page in turn, stopping at the first with a recipe. Callback fires on
+	 * OkHttp's thread, never the client thread - callers must hop back via ClientThread before
+	 * touching any Client API.
 	 */
-	public void fetchRecipes(String pageName, Consumer<List<Recipe>> callback)
+	public void fetchRecipes(List<String> pageNames, Consumer<List<Recipe>> callback)
+	{
+		fetchCandidate(pageNames, 0, callback);
+	}
+
+	private void fetchCandidate(List<String> pageNames, int index, Consumer<List<Recipe>> callback)
+	{
+		if (index >= pageNames.size())
+		{
+			callback.accept(Collections.emptyList());
+			return;
+		}
+
+		fetchRecipes(pageNames.get(index), recipes ->
+		{
+			if (!recipes.isEmpty() || index + 1 >= pageNames.size())
+			{
+				callback.accept(recipes);
+				return;
+			}
+			fetchCandidate(pageNames, index + 1, callback);
+		});
+	}
+
+	private void fetchRecipes(String pageName, Consumer<List<Recipe>> callback)
 	{
 		fetchRecipes(pageName, callback, true);
 	}

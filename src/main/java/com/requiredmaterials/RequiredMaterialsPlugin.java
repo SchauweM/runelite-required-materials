@@ -1,6 +1,7 @@
 package com.requiredmaterials;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -182,10 +183,10 @@ public class RequiredMaterialsPlugin extends Plugin
 	 */
 	private void trackFromWiki(String partName, String skill)
 	{
-		String pageName = wikiPageName(partName, skill);
+		List<String> pageNames = wikiPageCandidates(partName, skill);
 		String variant = wikiVariant(partName, skill);
 
-		wikiRecipeService.fetchRecipes(pageName, recipes ->
+		wikiRecipeService.fetchRecipes(pageNames, recipes ->
 		{
 			WikiRecipeService.Recipe recipe = selectRecipe(recipes, variant);
 
@@ -204,7 +205,7 @@ public class RequiredMaterialsPlugin extends Plugin
 
 				if (!tracked)
 				{
-					log.warn("Required materials: could not resolve requirements for '{}' (page '{}')", partName, pageName);
+					log.warn("Required materials: could not resolve requirements for '{}' (tried {})", partName, pageNames);
 					return;
 				}
 
@@ -265,6 +266,19 @@ public class RequiredMaterialsPlugin extends Plugin
 		}
 		// Rafts are the only size calling this part a "base", and carry no suffix.
 		return partName.toLowerCase().endsWith("base") ? "Raft" : null;
+	}
+
+	/**
+	 * Ship facilities (Range, Keg, ...) share their name with unrelated pages and live under a
+	 * "(facility)" suffix - "Range" is a cooking range, "Keg" is a disambiguation page. Boat
+	 * parts resolve on the first candidate, so the second is only ever fetched on a miss.
+	 */
+	private List<String> wikiPageCandidates(String partName, String skill)
+	{
+		String pageName = wikiPageName(partName, skill);
+		return "Sailing".equals(skill)
+			? Arrays.asList(pageName, pageName + " (facility)")
+			: Collections.singletonList(pageName);
 	}
 
 	private String wikiPageName(String partName, String skill)
