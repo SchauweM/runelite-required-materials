@@ -1,82 +1,88 @@
 # Required Materials
 
-A RuneLite plugin that tracks what you still need to build things in **Sailing** and
-**Construction**. Click a build in-game and it lands in a side panel showing your bank counts
-against the required amounts, plus the skill levels it needs. Open your bank and a toggle
-rearranges the grid to put exactly those items in front of you.
+Keeps track of what you still need to build things in **Sailing** and **Construction**.
 
-## How it works
+Click something you want to build, and it gets added to a list showing exactly which materials
+you're missing and which levels you need. Open your bank and one click pulls those materials to
+the top, so you can see at a glance what to withdraw and what's still missing.
 
-### Tracking something
+No setup, no configuration. Click a build, and it's tracked.
 
-Click any build in-game and it gets tracked. Four places work:
+## Adding something to your list
+
+Click on anything you want to build. It works in four places:
 
 | Where | What to click |
 |---|---|
 | Sailing skill guide | any entry |
 | Construction skill guide | any entry |
-| Boat Customisation | **Build**, or **Check Materials** |
+| Boat Customisation | **Build** or **Check Materials** |
 | Furniture Creation menu | **Build** |
 
-Both the old and new skill guide layouts are supported. Clicking a build you're already
-tracking refreshes it and moves it to the bottom of its list.
+Both the old and new skill guide styles work. Clicking something already on your list just
+refreshes it.
 
-### Where the numbers come from
+## Reading your list
 
-Requirements are read from the item's [OSRS Wiki](https://oldschool.runescape.wiki) page —
-specifically its `{{Recipe}}` template, which carries the materials and the skill levels. The
-game itself only reliably tells us *which* item you clicked, so the wiki fills in the rest.
+Your list is in the side panel, split into a section per skill. The skill you used most
+recently sits on top, and you can collapse either section by clicking its heading.
 
-Nothing is scraped from the game's interfaces, which matters because the same information is
-presented three different ways depending on where you click, and one of those (Boat
-Customisation) shows levels only as unlabelled icons and numbers.
+Everything is colour-coded, so you can tell at a glance where you stand:
 
-A few Construction activities aren't documented with a `{{Recipe}}` — Mahogany Homes,
-Birdhouses, STASH units, and the eternal fires. Those fall back to reading the materials out
-of the game's chat message and the levels out of the skill guide, so they still track.
+| Colour | Meaning |
+|---|---|
+| **Green** | You have enough, or you meet the level |
+| **Orange** | You have some, but not enough yet |
+| **Grey** | You don't have any yet, or don't meet the level |
 
-### The side panel
+Each entry shows the levels you need first, then the materials as `have/need`. So
+`Swamp tar (44/10)` in green means you need 10 and have 44 — sorted. `Oak logs (0/10)` in grey
+means you haven't got any yet.
 
-Tracked builds are grouped into a collapsible section per skill, with the most recently
-tracked skill on top. Each build shows:
+Counts include **both your bank and your inventory**, and they're remembered between sessions,
+so your numbers are there even before you next visit a bank.
 
-- **Skill levels**, green once you meet them, grey while you don't.
-- **Materials**, as `have/need` — green when you have enough, orange when you have some,
-  grey at zero.
+Boats come in three sizes, and rather than clutter the list with three near-identical entries,
+they share one with a dropdown to switch between **Raft**, **Skiff** and **Sloop**.
 
-Grey rather than red at zero is deliberate: a count of zero could equally mean "you own none"
-or "you haven't opened your bank this session", and the plugin can't tell those apart.
+Use **Clear all** at the top to empty the list, or the small **x** on any entry to remove just
+that one.
 
-Boat parts that come in several sizes — `(raft)`, `(skiff)`, `(sloop)` — share a single card
-with a dropdown instead of appearing as three lookalike entries. A raft's *base* and a
-skiff/sloop's *hull* are the same slot under different names, so they're merged too.
+## Using it at the bank
 
-Quantities update live as your bank changes, and level colours update when you level up.
-
-### The bank view
-
-A small **F** button sits in the top-right of the bank window. Toggling it on rebuilds the
-bank grid so tracked materials come first, grouped under a heading per build, each with a
-`have / need` label and a tick or cross. Everything else in your bank drops below under
+Open your bank and you'll see a hammer button near the scrollbar. Click it, and your bank
+reorganises so everything you're collecting comes first, grouped under each build with a tick
+if you have enough and a cross if you don't. The rest of your bank sits below under
 **Other items**.
 
-This reuses the bank's real item slots rather than drawing an overlay, so withdrawing works
-normally. Toggle it off and your bank is exactly as it was.
+These are your real bank items, just rearranged, so you can withdraw as normal. Click the
+button again and your bank goes back to exactly how it was.
+
+## Where the numbers come from
+
+Requirements are looked up from the [OSRS Wiki](https://oldschool.runescape.wiki), so they stay
+correct as the game changes without the plugin needing an update. Only the name of the thing
+you clicked is ever sent, and nothing about you or your account leaves the game.
+
+A handful of Construction activities aren't listed on the wiki in a way that can be read
+automatically — Mahogany Homes, bird houses, STASH units and the eternal fires. Those are read
+from the game itself instead, so they still work.
 
 ## Installing
 
-Build the jar and drop it in RuneLite's sideload folder:
+Build it:
 
 ```bash
 gradle jar
 ```
 
+Then copy it into RuneLite's plugin folder:
+
 ```bash
 mkdir -p ~/.runelite/sideloaded-plugins && cp build/libs/required-materials-1.0.0.jar ~/.runelite/sideloaded-plugins/
 ```
 
-Start RuneLite and enable **Required Materials** in the plugin list. The plugin has no
-settings — tracking is driven entirely by what you click in-game.
+Start RuneLite and turn on **Required Materials** in the plugin list.
 
 ## How to contribute
 
