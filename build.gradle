@@ -1,0 +1,70 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.shipmaterials'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        url = uri('https://repo.runelite.net')
+    }
+}
+
+def runeLiteVersion = 'latest.release'
+def pluginMainClass = 'com.shipmaterials.ShipMaterialsPluginTest'
+
+dependencies {
+    compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
+    compileOnly group: 'org.projectlombok', name: 'lombok', version: '1.18.46'
+    annotationProcessor group: 'org.projectlombok', name: 'lombok', version: '1.18.46'
+
+    testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
+    testImplementation group: 'junit', name: 'junit', version: '4.13.2'
+}
+
+// Sideloaded plugin jars must NOT bundle the runelite client / its transitive deps
+// (they're already on the classpath when RuneLite runs) - a plain jar of just our
+// compiled classes + resources is what belongs in ~/.runelite/sideloaded-plugins/.
+jar {
+    from(sourceSets.main.output)
+}
+
+test {
+    useJUnit()
+}
+
+// Launches the real RuneLite client in-process with this plugin already loaded,
+// for live testing against your actual account - same pattern as other RuneLite
+// plugin dev setups (ExternalPluginManager.loadBuiltin + RuneLite.main).
+tasks.register('run', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = pluginMainClass
+    executable = '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java'
+
+    jvmArgs "-ea"
+    jvmArgs "--add-opens=java.base/java.lang=ALL-UNNAMED"
+    jvmArgs "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
+    jvmArgs "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
+    jvmArgs "--add-opens=java.base/java.net=ALL-UNNAMED"
+    jvmArgs "--add-opens=java.base/java.io=ALL-UNNAMED"
+    jvmArgs "--add-opens=java.base/java.util=ALL-UNNAMED"
+    if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+        jvmArgs "--add-opens=java.desktop/com.apple.eawt=ALL-UNNAMED"
+        jvmArgs "--add-opens=java.desktop/sun.awt=ALL-UNNAMED"
+        jvmArgs "--add-opens=java.desktop/java.applet=ALL-UNNAMED"
+        jvmArgs "--add-opens=java.desktop/java.awt.event=ALL-UNNAMED"
+        jvmArgs "--add-exports=java.desktop/com.apple.eawt=ALL-UNNAMED"
+    }
+    args "--developer-mode", "--debug"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs << "-Xlint:deprecation"
+}
