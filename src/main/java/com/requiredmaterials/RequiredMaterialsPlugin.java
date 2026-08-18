@@ -457,5 +457,6 @@ public class RequiredMaterialsPlugin extends Plugin
 	public void onScriptPostFired(ScriptPostFired event)
 	{
 		bankGroupedView.onScriptPostFired(event.getScriptId());
+		bankButtonManager.onScriptPostFired(event.getScriptId());
 	}
 }
