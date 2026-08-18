@@ -1,15 +1,13 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.FontID;
 import net.runelite.api.Item;
@@ -30,17 +28,11 @@ import net.runelite.client.plugins.bank.BankSearch;
 import net.runelite.client.util.QuantityFormatter;
 
 /**
- * Reorganises the bank's item grid to show tracked ship-material requirements grouped by
- * part, at the top of the bank, exactly like Quest Helper's per-quest bank tab - just grouped
- * by tracked requirement (part) instead of by quest step. Adapted from Quest Helper's
- * QuestBankTab/QuestBankTabInterface (Zoinkwiz/quest-helper, BSD-2-Clause), which reuses the
- * bank's own real item-slot widgets as generic positionable slots rather than drawing a
- * separate overlay: the trick is hooking net.runelite.api.ScriptID#BANKMAIN_FINISHBUILDING,
- * the same script the game itself uses to build the bank grid every time it changes, and
- * overwriting its output afterward when the grouped view is active. When it's not active we
- * simply don't touch anything post-build, so the real bank view is untouched.
+ * Reorganises the bank's item grid to show tracked material requirements grouped by part, at the
+ * top of the bank. Reuses the bank's own item-slot widgets as generic positionable slots rather
+ * than drawing an overlay, by hooking {@link ScriptID#BANKMAIN_FINISHBUILDING} (the script the
+ * game itself uses to build the grid) and overwriting its output while active.
  */
-@Slf4j
 @Singleton
 public class BankGroupedView
 {
@@ -444,7 +436,6 @@ public class BankGroupedView
 			yPos = baseY + 9;
 		}
 
-		boolean hasEnough = currentQuantity >= goalQuantity;
 		int spritePosX = xPos + requirementLength + 10;
 		int spritePosY = yPos;
 		if (yPos != baseY - 1)
@@ -453,6 +444,7 @@ public class BankGroupedView
 			spritePosY = baseY - 1;
 		}
 
+		boolean hasEnough = currentQuantity >= goalQuantity;
 		bankItemTexts.add(new BankText("/ " + quantityString, xPos, yPos,
 			hasEnough ? TICK_SPRITE_ID : CROSS_SPRITE_ID, spritePosX, spritePosY));
 	}

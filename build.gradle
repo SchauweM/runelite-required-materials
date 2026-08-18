@@ -2,23 +2,24 @@ plugins {
     id 'java'
 }
 
-group = 'com.shipmaterials'
+group = 'com.requiredmaterials'
 version = '1.0.0'
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
-}
-
 repositories {
-    mavenCentral()
+    mavenLocal()
     maven {
-        url = uri('https://repo.runelite.net')
+        url = 'https://repo.runelite.net'
+        content {
+            includeGroupByRegex("net\\.runelite.*")
+        }
     }
+    mavenCentral()
 }
 
-def runeLiteVersion = 'latest.release'
-def pluginMainClass = 'com.shipmaterials.ShipMaterialsPluginTest'
+// -Puse.snapshot builds against RuneLite's integration builds, so upcoming breakage shows up
+// before it reaches a release.
+def runeLiteVersion = 'latest.' + (project.hasProperty('use.snapshot') ? 'integration' : 'release')
+def pluginMainClass = 'com.requiredmaterials.RequiredMaterialsPluginTest'
 
 dependencies {
     compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
@@ -29,25 +30,30 @@ dependencies {
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
 }
 
-// Sideloaded plugin jars must NOT bundle the runelite client / its transitive deps
-// (they're already on the classpath when RuneLite runs) - a plain jar of just our
-// compiled classes + resources is what belongs in ~/.runelite/sideloaded-plugins/.
-jar {
-    from(sourceSets.main.output)
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release.set(11)
+    options.compilerArgs << "-Xlint:deprecation"
 }
 
 test {
     useJUnit()
 }
 
-// Launches the real RuneLite client in-process with this plugin already loaded,
-// for live testing against your actual account - same pattern as other RuneLite
-// plugin dev setups (ExternalPluginManager.loadBuiltin + RuneLite.main).
+// Launches the real RuneLite client in-process with this plugin already loaded, for testing
+// against your own account (ExternalPluginManager.loadBuiltin + RuneLite.main).
 tasks.register('run', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = pluginMainClass
-    executable = '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java'
 
+    // Defaults to whichever JDK Gradle is running on. Point at another with -PrunJdk=/path/to/java
+    // if that one doesn't suit - RuneLite's launcher itself runs on 11.
+    if (project.hasProperty('runJdk')) {
+        executable = project.property('runJdk')
+    }
+
+    // Without these, event subscriber registration silently falls back to slower reflection and
+    // logs LambdaConversionException warnings. They mirror the official launcher's own flags.
     jvmArgs "-ea"
     jvmArgs "--add-opens=java.base/java.lang=ALL-UNNAMED"
     jvmArgs "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
@@ -63,8 +69,4 @@ tasks.register('run', JavaExec) {
         jvmArgs "--add-exports=java.desktop/com.apple.eawt=ALL-UNNAMED"
     }
     args "--developer-mode", "--debug"
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.compilerArgs << "-Xlint:deprecation"
 }

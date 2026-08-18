@@ -5,3 +5,6 @@ out/
 .idea/
 .vscode/
 .DS_Store
+
+# Local-only: pins `gradle run` to a JDK that suits the RuneLite client
+gradle.properties

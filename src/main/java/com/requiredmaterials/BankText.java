@@ -1,8 +1,8 @@
-package com.shipmaterials;
+package com.requiredmaterials;
 
 /**
- * A pending "current / goal" quantity label (plus optional tick/cross sprite) queued up
- * while laying out a section, then drawn last so it always overlays the item icons beneath it.
+ * A pending "current / goal" quantity label (plus optional tick/cross sprite) queued up while
+ * laying out a section, then drawn last so it always overlays the item icons beneath it.
  */
 class BankText
 {
