@@ -156,7 +156,8 @@ public class WikiRecipeService
 		return parse == null ? null : parse.getAsJsonObject("wikitext").get("*").getAsString();
 	}
 
-	private List<Recipe> parseRecipes(String wikitext)
+	// Package-private so the wikitext parsing can be tested without any network access.
+	List<Recipe> parseRecipes(String wikitext)
 	{
 		List<Recipe> recipes = new ArrayList<>();
 		for (Map<String, String> params : extractTemplates(wikitext, "{{Recipe"))
@@ -170,7 +171,7 @@ public class WikiRecipeService
 	 * A page with no recipe may be a disambiguation page (e.g. "Water pump" lists seven unrelated
 	 * things). Its first link is the one we want.
 	 */
-	private String firstDisambiguationLink(String wikitext)
+	String firstDisambiguationLink(String wikitext)
 	{
 		if (!wikitext.contains("{{disambig"))
 		{
