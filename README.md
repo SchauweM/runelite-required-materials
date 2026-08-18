@@ -27,17 +27,10 @@ refreshes it.
 Your list is in the side panel, split into a section per skill. The skill you used most
 recently sits on top, and you can collapse either section by clicking its heading.
 
-Everything is colour-coded, so you can tell at a glance where you stand:
+<img src="docs/side-panel.png" alt="The side panel showing tracked builds" width="300">
 
-| Colour | Meaning |
-|---|---|
-| **Green** | You have enough, or you meet the level |
-| **Orange** | You have some, but not enough yet |
-| **Grey** | You don't have any yet, or don't meet the level |
-
-Each entry shows the levels you need first, then the materials as `have/need`. So
-`Swamp tar (44/10)` in green means you need 10 and have 44 — sorted. `Oak logs (0/10)` in grey
-means you haven't got any yet.
+Green means you're set, orange means you're partway there, and grey means you haven't started.
+That applies to both the levels and the materials.
 
 Counts include **both your bank and your inventory**, and they're remembered between sessions,
 so your numbers are there even before you next visit a bank.
@@ -50,10 +43,9 @@ that one.
 
 ## Using it at the bank
 
-Open your bank and you'll see a hammer button near the scrollbar. Click it, and your bank
-reorganises so everything you're collecting comes first, grouped under each build with a tick
-if you have enough and a cross if you don't. The rest of your bank sits below under
-**Other items**.
+Open your bank and you'll see a hammer button near the scrollbar. Click it:
+
+<img src="docs/bank-view.png" alt="The bank grouped by build" width="600">
 
 These are your real bank items, just rearranged, so you can withdraw as normal. Click the
 button again and your bank goes back to exactly how it was.
