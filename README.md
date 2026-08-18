@@ -24,22 +24,13 @@ refreshes it.
 
 ## Reading your list
 
-Your list is in the side panel, split into a section per skill. The skill you used most
-recently sits on top, and you can collapse either section by clicking its heading.
+The plugin checks your bank and inventory against what each build needs, and shows you what's
+still missing.
 
 <img src="docs/side-panel.png" alt="The side panel showing tracked builds" width="300">
 
-Green means you're set, orange means you're partway there, and grey means you haven't started.
-That applies to both the levels and the materials.
-
-Counts include **both your bank and your inventory**, and they're remembered between sessions,
-so your numbers are there even before you next visit a bank.
-
-Boats come in three sizes, and rather than clutter the list with three near-identical entries,
-they share one with a dropdown to switch between **Raft**, **Skiff** and **Sloop**.
-
-Use **Clear all** at the top to empty the list, or the small **x** on any entry to remove just
-that one.
+Green means you have enough, orange means partway, grey means none yet — for levels as well as
+materials. Boats come in three sizes, so those share one entry with a dropdown.
 
 ## Using it at the bank
 
