@@ -34,12 +34,6 @@ public class BankButtonManager
 	private BankGroupedView bankGroupedView;
 
 	private Widget buttonRect;
-	private Widget buttonLabel;
-
-	public boolean isFilterActive()
-	{
-		return bankGroupedView.isActive();
-	}
 
 	public void onBankWidgetLoaded()
 	{
@@ -57,7 +51,6 @@ public class BankButtonManager
 	public void onBankWidgetClosed()
 	{
 		buttonRect = null;
-		buttonLabel = null;
 		bankGroupedView.reset();
 	}
 
@@ -95,7 +88,6 @@ public class BankButtonManager
 		label.revalidate();
 
 		this.buttonRect = rect;
-		this.buttonLabel = label;
 	}
 
 	private void toggleFilter()

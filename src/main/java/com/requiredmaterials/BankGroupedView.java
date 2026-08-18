@@ -3,13 +3,11 @@ package com.requiredmaterials;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.FontID;
 import net.runelite.api.Item;
@@ -30,14 +28,11 @@ import net.runelite.client.plugins.bank.BankSearch;
 import net.runelite.client.util.QuantityFormatter;
 
 /**
- * Reorganises the bank's item grid to show tracked material requirements grouped by part, at
- * the top of the bank. Reuses the bank's own real item-slot widgets as generic positionable
- * slots rather than drawing a separate overlay, by hooking {@link ScriptID#BANKMAIN_FINISHBUILDING}
- * - the same script the game itself uses to build the bank grid every time it changes - and
- * overwriting its output afterward when the grouped view is active. When it's not active
- * nothing is touched post-build, so the real bank view is untouched.
+ * Reorganises the bank's item grid to show tracked material requirements grouped by part, at the
+ * top of the bank. Reuses the bank's own item-slot widgets as generic positionable slots rather
+ * than drawing an overlay, by hooking {@link ScriptID#BANKMAIN_FINISHBUILDING} (the script the
+ * game itself uses to build the grid) and overwriting its output while active.
  */
-@Slf4j
 @Singleton
 public class BankGroupedView
 {
@@ -232,7 +227,7 @@ public class BankGroupedView
 
 		for (BankText bankText : bankItemTexts)
 		{
-			addedWidgets.add(createText(itemContainer, bankText.text, bankText.textColor,
+			addedWidgets.add(createText(itemContainer, bankText.text, Color.WHITE.getRGB(),
 				ITEM_HORIZONTAL_SPACING, TEXT_HEIGHT - 3, bankText.x, bankText.y));
 
 			if (bankText.spriteId != -1)
@@ -450,7 +445,7 @@ public class BankGroupedView
 		}
 
 		boolean hasEnough = currentQuantity >= goalQuantity;
-		bankItemTexts.add(new BankText("/ " + quantityString, xPos, yPos, Color.WHITE.getRGB(),
+		bankItemTexts.add(new BankText("/ " + quantityString, xPos, yPos,
 			hasEnough ? TICK_SPRITE_ID : CROSS_SPRITE_ID, spritePosX, spritePosY));
 	}
 
