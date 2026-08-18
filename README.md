@@ -1,75 +1,138 @@
-# Ship Materials
+# Required Materials
 
-A RuneLite plugin for OSRS Sailing: tracks which materials you need for ship upgrades
-(parsed from the chat message you get when clicking a requirement in-game), and lets you
-highlight those items in your bank with a toggle button.
+A RuneLite plugin that tracks what you still need to build things in **Sailing** and
+**Construction**. Click a build in-game and it lands in a side panel showing your bank counts
+against the required amounts, plus the skill levels it needs. Open your bank and a toggle
+rearranges the grid to put exactly those items in front of you.
 
-## Features
+## How it works
 
-- **Requirement tracking**: click a ship upgrade's requirements in-game (e.g. in the ship
-  customisation screen). The game sends a chat message like:
-  `Oak mast and linen sail materials: Oak logs x5, Iron nails x 20, Bolt of linen x5.`
-  This plugin parses that message and adds it to a tracked list, viewable (and clearable)
-  in the sidebar panel.
-- **Bank highlight**: a small toggle button is injected into the top-right corner of the
-  bank window (next to the close button, matching where Quest Helper places its own bank
-  button). Toggling it on draws a colored border around every bank item that's part of a
-  tracked requirement, and dims everything else.
+### Tracking something
 
-## Building
+Click any build in-game and it gets tracked. Four places work:
 
-```
+| Where | What to click |
+|---|---|
+| Sailing skill guide | any entry |
+| Construction skill guide | any entry |
+| Boat Customisation | **Build**, or **Check Materials** |
+| Furniture Creation menu | **Build** |
+
+Both the old and new skill guide layouts are supported. Clicking a build you're already
+tracking refreshes it and moves it to the bottom of its list.
+
+### Where the numbers come from
+
+Requirements are read from the item's [OSRS Wiki](https://oldschool.runescape.wiki) page —
+specifically its `{{Recipe}}` template, which carries the materials and the skill levels. The
+game itself only reliably tells us *which* item you clicked, so the wiki fills in the rest.
+
+Nothing is scraped from the game's interfaces, which matters because the same information is
+presented three different ways depending on where you click, and one of those (Boat
+Customisation) shows levels only as unlabelled icons and numbers.
+
+A few Construction activities aren't documented with a `{{Recipe}}` — Mahogany Homes,
+Birdhouses, STASH units, and the eternal fires. Those fall back to reading the materials out
+of the game's chat message and the levels out of the skill guide, so they still track.
+
+### The side panel
+
+Tracked builds are grouped into a collapsible section per skill, with the most recently
+tracked skill on top. Each build shows:
+
+- **Skill levels**, green once you meet them, grey while you don't.
+- **Materials**, as `have/need` — green when you have enough, orange when you have some,
+  grey at zero.
+
+Grey rather than red at zero is deliberate: a count of zero could equally mean "you own none"
+or "you haven't opened your bank this session", and the plugin can't tell those apart.
+
+Boat parts that come in several sizes — `(raft)`, `(skiff)`, `(sloop)` — share a single card
+with a dropdown instead of appearing as three lookalike entries. A raft's *base* and a
+skiff/sloop's *hull* are the same slot under different names, so they're merged too.
+
+Quantities update live as your bank changes, and level colours update when you level up.
+
+### The bank view
+
+A small **F** button sits in the top-right of the bank window. Toggling it on rebuilds the
+bank grid so tracked materials come first, grouped under a heading per build, each with a
+`have / need` label and a tick or cross. Everything else in your bank drops below under
+**Other items**.
+
+This reuses the bank's real item slots rather than drawing an overlay, so withdrawing works
+normally. Toggle it off and your bank is exactly as it was.
+
+## Installing
+
+Build the jar and drop it in RuneLite's sideload folder:
+
+```bash
 gradle jar
 ```
 
-Produces `build/libs/ship-materials-1.0.0.jar`.
-
-## Testing against your real account (dev mode)
-
+```bash
+mkdir -p ~/.runelite/sideloaded-plugins && cp build/libs/required-materials-1.0.0.jar ~/.runelite/sideloaded-plugins/
 ```
+
+Start RuneLite and enable **Required Materials** in the plugin list. The plugin has no
+settings — tracking is driven entirely by what you click in-game.
+
+## How to contribute
+
+### Running it locally
+
+```bash
 gradle run
 ```
 
-This launches the actual RuneLite client in-process with the plugin already loaded
-(`ExternalPluginManager.loadBuiltin` + `RuneLite.main`), so you can log in and test against
-your real account. It restores your last saved profile/session the same way the normal
-client does.
+This launches the real RuneLite client in-process with the plugin already loaded, so you can
+log in and test against your own account. It restores your usual profile and session the same
+way the normal client does.
 
-Notes:
-- The `run` task is pinned to a Temurin 25 JDK and passes the `--add-opens` flags RuneLite's
-  event bus needs; on very new JDKs (26+) without those flags, event subscriber registration
-  can silently fall back to slower reflection and log `LambdaConversionException` warnings.
-  If `gradle run` can't find that JDK path on your machine, edit the `executable` line in
-  `build.gradle`'s `run` task to point at a JDK 11-21 `java` binary you have installed.
-- To restart after a code change: kill the running dev-client process
-  (`pgrep -fl ShipMaterialsPluginTest`, then `kill <pid>` - a plain SIGTERM is enough, it
-  shuts down cleanly) and run `gradle run` again.
+The `run` task is pinned to a specific JDK and passes the `--add-opens` flags RuneLite's event
+bus needs:
 
-## Installing for normal play (sideloading)
-
-Official RuneLite (the release client, not this dev-mode launcher) scans
-`~/.runelite/sideloaded-plugins/` for external plugin jars:
-
-```
-mkdir -p ~/.runelite/sideloaded-plugins
-cp build/libs/ship-materials-1.0.0.jar ~/.runelite/sideloaded-plugins/
+```groovy
+executable = '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java'
 ```
 
-Then start RuneLite normally and enable "Ship Materials" from the plugin list if it isn't
-already on.
+If that path doesn't exist on your machine, point it at a JDK you do have. Without the
+`--add-opens` flags, event subscriber registration silently falls back to slower reflection
+and logs `LambdaConversionException` warnings, so keep them if you change the JDK.
 
-## Implementation notes
+To restart after a code change, kill the running dev client and start it again — a plain
+`SIGTERM` shuts it down cleanly:
 
-- Widget IDs use the current, non-deprecated `net.runelite.api.gameval.InterfaceID` constants
-  rather than the deprecated `WidgetID` class. These were verified against the actual
-  `runelite-api` jar (1.12.35) rather than guessed - that jar already ships Sailing's own
-  interfaces (`InterfaceID.SailingCustomisation`, etc.), confirming this API version is
-  current enough for Sailing content.
-- The bank button's position (`BankButtonManager`) was matched against Quest Helper's own
-  bank button placement by decompiling the quest-helper plugin jar already present in this
-  RuneLite install - it anchors to `InterfaceID.Bankmain.UNIVERSE` at a fixed pixel offset
-  near the top-right corner rather than to any specific "close button" widget.
-- Item name -> item ID resolution uses `ItemManager.search()`, matched case-insensitively
-  against the parsed material name. If a name doesn't resolve (e.g. a typo, or a very new
-  item not yet in the client's item name index), it still shows in the sidebar panel (in red)
-  but won't be highlightable in the bank until it resolves.
+```bash
+pkill -f RequiredMaterialsPluginTest && gradle run
+```
+
+### How the code is laid out
+
+| Class | Does what |
+|---|---|
+| `RequiredMaterialsPlugin` | Event handling; decides what got clicked and in which skill |
+| `WikiRecipeService` | Fetches and parses `{{Recipe}}` templates, cached per page |
+| `ChatMaterialsParser` | Fallback: materials from chat messages |
+| `GuideLevelReader` | Fallback: levels from skill guide widgets |
+| `MaterialsManager` | Stores tracked builds, resolves item IDs, persists to config |
+| `RequiredMaterialsPanel` | The side panel |
+| `BankGroupedView` | Rebuilds the bank grid |
+| `BankButtonManager` | The bank toggle button |
+
+### Things worth knowing before you change something
+
+- **Client thread.** Most RuneLite `Client` calls assert they're on the client thread, and
+  Swing listeners are not. Anything touching game state from a UI callback has to go through
+  `ClientThread.invoke`. Wiki lookups come back on an HTTP thread and need the same treatment.
+- **Widget IDs** come from `net.runelite.api.gameval.InterfaceID`, not the deprecated
+  `WidgetID`.
+- **Dynamic widget children.** Some interface text lives on dynamically-created children whose
+  `getId()` reports their static ancestor. The skill guide title is one of these — reading it
+  directly always returns blank; you have to walk `getDynamicChildren()`.
+- **Item IDs.** `ItemManager.search()` only covers GE-tradeable items, so non-tradeable
+  materials fall back to a scan of the client's own item definitions. Anything that still
+  doesn't resolve shows in red in the panel and can't be highlighted in the bank.
+- **Wiki quirks.** An omitted `matNquantity` means 1, and a page with no recipe may be a
+  disambiguation page whose first link is the real one.
