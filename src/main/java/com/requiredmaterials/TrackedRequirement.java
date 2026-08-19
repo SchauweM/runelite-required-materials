@@ -22,6 +22,14 @@ public class TrackedRequirement
 	private List<String> levelRequirements = new ArrayList<>();
 
 	/**
+	 * Things that must already be built rather than collected - furniture upgrades name the
+	 * previous tier ("Tool store 3"). Shown as requirements, but not counted against the bank,
+	 * and not checked when working out whether a build is possible: the client doesn't tell us
+	 * what's in the player's house.
+	 */
+	private List<String> prerequisites = new ArrayList<>();
+
+	/**
 	 * Which skill this was tracked from (e.g. "Sailing", "Construction") - drives which
 	 * side-panel accordion this shows up under.
 	 */

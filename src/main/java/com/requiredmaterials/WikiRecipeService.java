@@ -8,8 +8,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -34,9 +36,12 @@ import okhttp3.ResponseBody;
 @Singleton
 public class WikiRecipeService
 {
-	private static final String API_URL = "https://oldschool.runescape.wiki/api.php?action=parse&prop=wikitext&format=json&page=";
+	private static final String API_URL = "https://oldschool.runescape.wiki/api.php?action=parse&prop=wikitext&format=json&redirects=true&page=";
 	private static final String USER_AGENT = "RequiredMaterials-RuneLite-Plugin/1.0";
 	// Disambiguation pages link either as plain wikilinks or through the plink/ilink templates.
+	// Furniture pages carry the ids of the objects the build places in the house, versioned as
+	// "id1"/"id2" when a page covers several variants.
+	private static final Pattern OBJECT_ID_PATTERN = Pattern.compile("^\\|\\s*id\\d*\\s*=\\s*([0-9,\\s]+)$", Pattern.MULTILINE);
 	private static final Pattern DISAMBIG_LINK_PATTERN =
 		Pattern.compile("(?:\\[\\[|\\{\\{(?:plink|ilink)\\|)([^\\]|}]+)");
 
@@ -54,6 +59,11 @@ public class WikiRecipeService
 		String outputSubtext;
 		Map<String, Integer> materials;
 		List<String> levelRequirements;
+		/**
+		 * Furniture that has to be standing already rather than collected - an upgrade's previous
+		 * tier. Listed among the materials, but marked with a cost of zero and no quantity.
+		 */
+		Set<String> prerequisites;
 	}
 
 	/**
@@ -100,6 +110,66 @@ public class WikiRecipeService
 			return;
 		}
 
+		fetchWikitext(pageName, wikitext ->
+		{
+			if (wikitext == null)
+			{
+				cache.put(pageName, Collections.emptyList());
+				callback.accept(Collections.emptyList());
+				return;
+			}
+
+			List<Recipe> recipes = parseRecipes(wikitext);
+			if (recipes.isEmpty() && followDisambiguation)
+			{
+				String firstLink = firstDisambiguationLink(wikitext);
+				if (firstLink != null)
+				{
+					fetchRecipes(firstLink, callback, false);
+					return;
+				}
+			}
+
+			cache.put(pageName, recipes);
+			callback.accept(recipes);
+		});
+	}
+
+	/**
+	 * The object ids a piece of furniture puts in the house, so its presence can be checked
+	 * against the scene. A page lists several when one build places several objects, or when the
+	 * page covers more than one variant.
+	 */
+	void fetchObjectIds(String pageName, Consumer<Set<Integer>> callback)
+	{
+		fetchWikitext(pageName, wikitext ->
+			callback.accept(wikitext == null ? Collections.emptySet() : parseObjectIds(wikitext)));
+	}
+
+	static Set<Integer> parseObjectIds(String wikitext)
+	{
+		Set<Integer> ids = new LinkedHashSet<>();
+		Matcher matcher = OBJECT_ID_PATTERN.matcher(wikitext);
+		while (matcher.find())
+		{
+			for (String id : matcher.group(1).split(","))
+			{
+				try
+				{
+					ids.add(Integer.parseInt(id.trim()));
+				}
+				catch (NumberFormatException ignored)
+				{
+					// These fields also carry things like "N/A".
+				}
+			}
+		}
+		return ids;
+	}
+
+	/** @param callback receives the page's wikitext, or null if it couldn't be fetched. */
+	private void fetchWikitext(String pageName, Consumer<String> callback)
+	{
 		String url = API_URL + URLEncoder.encode(pageName.replace(' ', '_'), StandardCharsets.UTF_8);
 		Request request = new Request.Builder().url(url).header("User-Agent", USER_AGENT).build();
 		okHttpClient.newCall(request).enqueue(new Callback()
@@ -108,43 +178,21 @@ public class WikiRecipeService
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("Required materials: wiki lookup failed for '{}'", pageName, e);
-				callback.accept(Collections.emptyList());
+				callback.accept(null);
 			}
 
 			@Override
 			public void onResponse(Call call, Response response)
 			{
-				String wikitext;
 				try (ResponseBody body = response.body())
 				{
-					wikitext = !response.isSuccessful() || body == null ? null : extractWikitext(body.string());
+					callback.accept(!response.isSuccessful() || body == null ? null : extractWikitext(body.string()));
 				}
 				catch (Exception e)
 				{
 					log.warn("Required materials: failed to parse wiki response for '{}'", pageName, e);
-					wikitext = null;
+					callback.accept(null);
 				}
-
-				if (wikitext == null)
-				{
-					cache.put(pageName, Collections.emptyList());
-					callback.accept(Collections.emptyList());
-					return;
-				}
-
-				List<Recipe> recipes = parseRecipes(wikitext);
-				if (recipes.isEmpty() && followDisambiguation)
-				{
-					String firstLink = firstDisambiguationLink(wikitext);
-					if (firstLink != null)
-					{
-						fetchRecipes(firstLink, callback, false);
-						return;
-					}
-				}
-
-				cache.put(pageName, recipes);
-				callback.accept(recipes);
 			}
 		});
 	}
@@ -184,6 +232,7 @@ public class WikiRecipeService
 	private Recipe buildRecipe(Map<String, String> params)
 	{
 		Map<String, Integer> materials = new LinkedHashMap<>();
+		Set<String> prerequisites = new LinkedHashSet<>();
 		for (int i = 1; i <= 10; i++)
 		{
 			String name = params.get("mat" + i);
@@ -192,11 +241,26 @@ public class WikiRecipeService
 				continue;
 			}
 
-			// A quantity of 1 is often omitted rather than written out.
 			String quantity = params.get("mat" + i + "quantity");
+			if (quantity == null || quantity.isEmpty())
+			{
+				// No quantity and an explicit cost of nothing marks the previous tier of an
+				// upgrade. Both are needed: a real item can omit its quantity when one is meant
+				// (Cat blanket's bolt of cloth), and it carries no cost field at all.
+				if ("0".equals(params.get("mat" + i + "cost")))
+				{
+					prerequisites.add(name);
+				}
+				else
+				{
+					materials.put(name, 1);
+				}
+				continue;
+			}
+
 			try
 			{
-				materials.put(name, quantity == null || quantity.isEmpty() ? 1 : Integer.parseInt(quantity.trim()));
+				materials.put(name, Integer.parseInt(quantity.trim()));
 			}
 			catch (NumberFormatException ignored)
 			{
@@ -207,7 +271,7 @@ public class WikiRecipeService
 		addLevelRequirement(levelRequirements, params, "skill1", "skill1lvl");
 		addLevelRequirement(levelRequirements, params, "skill2", "skill2lvl");
 
-		return new Recipe(params.get("output1subtxt"), materials, levelRequirements);
+		return new Recipe(params.get("output1subtxt"), materials, levelRequirements, prerequisites);
 	}
 
 	private void addLevelRequirement(List<String> levelRequirements, Map<String, String> params, String skillKey, String levelKey)

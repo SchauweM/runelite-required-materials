@@ -96,4 +96,15 @@ public class ChatMaterialsParserTest
 		assertEquals(1, materials.size());
 		assertEquals(Integer.valueOf(5), materials.get("Oak logs"));
 	}
+
+	@Test
+	public void untaggedMessagesAreCompleteOnTheirOwn()
+	{
+		// Items are only coloured when you're short of them, so affording everything can produce
+		// a message with no tags and no trailing period. That isn't a truncated message.
+		ChatMaterialsParser parser = new ChatMaterialsParser();
+
+		assertFalse(parser.accumulate("Oak chest of drawers", "2 x Oak plank"));
+		assertEquals(Integer.valueOf(2), parser.getMaterials("Oak chest of drawers").get("Oak plank"));
+	}
 }
