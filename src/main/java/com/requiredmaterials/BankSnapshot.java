@@ -47,6 +47,16 @@ class BankSnapshot
 		configManager.setRSProfileConfiguration(MaterialsManager.CONFIG_GROUP, CONFIG_KEY, encode(updated));
 	}
 
+	/**
+	 * Whether anything has been recorded yet - nothing stored means the player hasn't opened a
+	 * bank since the plugin was enabled, so every count would read zero.
+	 */
+	boolean isKnown()
+	{
+		ensureLoaded();
+		return !counts.isEmpty();
+	}
+
 	int count(int itemId)
 	{
 		ensureLoaded();
@@ -55,7 +65,10 @@ class BankSnapshot
 
 	private void ensureLoaded()
 	{
-		if (counts == null)
+		// Deliberately re-reads while empty. Per-account config isn't readable until the player is
+		// logged in, so an empty first read means "not available yet", not "nothing stored" -
+		// caching that would strand the panel until a bank was opened.
+		if (counts == null || counts.isEmpty())
 		{
 			counts = decode(configManager.getRSProfileConfiguration(MaterialsManager.CONFIG_GROUP, CONFIG_KEY));
 		}
