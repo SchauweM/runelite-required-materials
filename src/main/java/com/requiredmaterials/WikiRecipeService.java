@@ -36,7 +36,7 @@ import okhttp3.ResponseBody;
 @Singleton
 public class WikiRecipeService
 {
-	private static final String API_URL = "https://oldschool.runescape.wiki/api.php?action=parse&prop=wikitext&format=json&page=";
+	private static final String API_URL = "https://oldschool.runescape.wiki/api.php?action=parse&prop=wikitext&format=json&redirects=true&page=";
 	private static final String USER_AGENT = "RequiredMaterials-RuneLite-Plugin/1.0";
 	// Disambiguation pages link either as plain wikilinks or through the plink/ilink templates.
 	private static final Pattern DISAMBIG_LINK_PATTERN =

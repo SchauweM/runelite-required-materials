@@ -75,8 +75,16 @@ class ChatMaterialsParser
 		{
 			return true;
 		}
+
+		// Items are only coloured when you're short of them, so a message can arrive with no
+		// tags at all - nothing to be mid-way through, so it's whole.
 		int lastOpenTag = trimmed.lastIndexOf("<col=");
-		return lastOpenTag != -1 && trimmed.indexOf("</col>", lastOpenTag) != -1;
+		if (lastOpenTag == -1)
+		{
+			return true;
+		}
+
+		return trimmed.indexOf("</col>", lastOpenTag) != -1;
 	}
 
 	/**
