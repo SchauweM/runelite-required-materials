@@ -46,7 +46,6 @@ public class RequiredMaterialsPlugin extends Plugin
 	private static final List<String> TRACKED_SKILLS = Arrays.asList("Sailing", "Construction");
 	private static final Pattern PART_NAME_PATTERN = Pattern.compile("^(.*?):");
 	private static final Pattern TAG_PATTERN = Pattern.compile("<[^>]*>");
-	private static final Pattern BOAT_TYPE_SUFFIX = Pattern.compile("\\(([^)]*)\\)$");
 	// "Check Materials" labels the part "Camphor hull materials"; every other trigger just says
 	// "Camphor hull", which is also the wiki page name.
 	private static final Pattern MATERIALS_SUFFIX = Pattern.compile("(?i)\\s+materials$");
@@ -324,13 +323,7 @@ public class RequiredMaterialsPlugin extends Plugin
 		{
 			return null;
 		}
-		Matcher matcher = BOAT_TYPE_SUFFIX.matcher(partName);
-		if (matcher.find())
-		{
-			return matcher.group(1).trim();
-		}
-		// Rafts are the only size calling this part a "base", and carry no suffix.
-		return partName.toLowerCase().endsWith("base") ? "Raft" : null;
+		return PartNames.boatSizeOf(partName);
 	}
 
 	/**
@@ -352,13 +345,8 @@ public class RequiredMaterialsPlugin extends Plugin
 		{
 			return partName;
 		}
-		String base = BOAT_TYPE_SUFFIX.matcher(partName).replaceAll("").trim();
 		// The wiki files the raft variant under "<tier> hull" too.
-		if (base.toLowerCase().endsWith("base"))
-		{
-			base = base.substring(0, base.length() - "base".length()) + "hull";
-		}
-		return base;
+		return PartNames.sharedName(partName);
 	}
 
 	/**

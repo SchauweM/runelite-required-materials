@@ -148,7 +148,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 			int position = 0;
 			for (TrackedRequirement requirement : materialsManager.getRequirements())
 			{
-				byPart.computeIfAbsent(canonicalGroupKey(requirement.getPartName()), k -> new ArrayList<>())
+				byPart.computeIfAbsent(PartNames.sharedName(requirement.getPartName()), k -> new ArrayList<>())
 					.add(requirement);
 				lastTrackedAt.put(skillOf(requirement), position++);
 			}
@@ -271,7 +271,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 				gbc.gridy++;
 				gbc.insets = new Insets(6, 0, 0, 0);
 				wrapper.add(variants.size() > 1
-					? buildOuterCard(capitalize(entry.getKey()), variants, buildVariantSection(entry.getKey(), variants))
+					? buildOuterCard(PartNames.capitalize(entry.getKey()), variants, buildVariantSection(entry.getKey(), variants))
 					: buildOuterCard(variants.get(0).getPartName(), variants, buildContent(variants.get(0))), gbc);
 			}
 		}
@@ -282,45 +282,6 @@ public class RequiredMaterialsPanel extends PluginPanel
 	private String skillOf(TrackedRequirement requirement)
 	{
 		return requirement.getSkill() != null ? requirement.getSkill() : UNKNOWN_SKILL;
-	}
-
-	private String variantBaseName(String partName)
-	{
-		Matcher m = VARIANT_SUFFIX.matcher(partName);
-		return m.matches() ? m.group(1).trim() : partName;
-	}
-
-	private String variantLabel(String partName)
-	{
-		Matcher m = VARIANT_SUFFIX.matcher(partName);
-		if (m.matches())
-		{
-			String suffix = m.group(2).trim();
-			return suffix.isEmpty() ? suffix : capitalize(suffix);
-		}
-		// An unsuffixed "base" is the raft's name for the part.
-		if (partName.toLowerCase().endsWith("base"))
-		{
-			return "Raft";
-		}
-		return partName;
-	}
-
-	/**
-	 * "<tier> base" (raft) and "<tier> hull" (skiff/sloop) are the same part slot under
-	 * different names, so both map to the "hull" key to share one card and picker.
-	 */
-	private String canonicalGroupKey(String partName)
-	{
-		String base = variantBaseName(partName);
-		return base.toLowerCase().endsWith("base")
-			? base.substring(0, base.length() - "base".length()) + "hull"
-			: base;
-	}
-
-	private String capitalize(String s)
-	{
-		return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
 	}
 
 	private JPanel buildOuterCard(String title, List<TrackedRequirement> allInside, JPanel content)
@@ -359,7 +320,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		JComboBox<String> variantPicker = new JComboBox<>();
 		for (TrackedRequirement variant : variants)
 		{
-			variantPicker.addItem(variantLabel(variant.getPartName()));
+			variantPicker.addItem(boatSize(variant.getPartName()));
 		}
 		int savedIndex = selectedVariantIndex.getOrDefault(selectionKey, 0);
 		if (savedIndex >= variants.size())
@@ -389,6 +350,13 @@ public class RequiredMaterialsPanel extends PluginPanel
 		}));
 
 		return section;
+	}
+
+	/** Falls back to the whole name so a picker never shows a blank entry. */
+	private String boatSize(String partName)
+	{
+		String size = PartNames.boatSizeOf(partName);
+		return size != null ? size : partName;
 	}
 
 	private JPanel buildContent(TrackedRequirement requirement)
