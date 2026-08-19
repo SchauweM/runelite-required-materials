@@ -1,6 +1,7 @@
 package com.requiredmaterials;
 
 import java.util.List;
+import java.util.Set;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -97,5 +98,32 @@ public class WikiRecipeServiceTest
 	{
 		// Range is a real scenery article, so there is nothing to redirect to.
 		assertNull(service.firstDisambiguationLink("{{Infobox Scenery\n|name = Range\n}}\nA range for cooking."));
+	}
+
+	@Test
+	public void separatesUpgradePrerequisitesFromMaterials()
+	{
+		// An upgrade names its previous tier with a cost of nothing and no quantity. It's also a
+		// real item - furniture has flatpacks of the same name - so the cost is what marks it.
+		List<WikiRecipeService.Recipe> recipes = new WikiRecipeService().parseRecipes(
+			"{{Recipe|skill1 = Construction|skill1lvl = 85"
+				+ "|mat1 = Rejuvenation pool|mat1cost = 0"
+				+ "|mat2 = Marble block|mat2quantity = 2"
+				+ "|output1 = Fancy rejuvenation pool}}");
+
+		WikiRecipeService.Recipe recipe = recipes.get(0);
+		assertEquals(Set.of("Rejuvenation pool"), recipe.getPrerequisites());
+		assertEquals(Set.of("Marble block"), recipe.getMaterials().keySet());
+	}
+
+	@Test
+	public void anOmittedQuantityAloneIsStillAMaterial()
+	{
+		// Cat blanket's bolt of cloth: no quantity, but no cost field either, so it's one to buy.
+		List<WikiRecipeService.Recipe> recipes = new WikiRecipeService().parseRecipes(
+			"{{Recipe|skill1 = Construction|mat1 = Bolt of cloth|output1 = Cat blanket}}");
+
+		assertTrue(recipes.get(0).getPrerequisites().isEmpty());
+		assertEquals(Integer.valueOf(1), recipes.get(0).getMaterials().get("Bolt of cloth"));
 	}
 }

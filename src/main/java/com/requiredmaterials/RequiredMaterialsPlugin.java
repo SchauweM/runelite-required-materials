@@ -10,8 +10,11 @@ import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
+import net.runelite.api.GameState;
 import net.runelite.api.Client;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.ScriptPostFired;
@@ -47,6 +50,7 @@ public class RequiredMaterialsPlugin extends Plugin
 	// "Check Materials" labels the part "Camphor hull materials"; every other trigger just says
 	// "Camphor hull", which is also the wiki page name.
 	private static final Pattern MATERIALS_SUFFIX = Pattern.compile("(?i)\\s+materials$");
+	private static final int HOUSE_SCAN_DELAY_TICKS = 6;
 
 	@Inject
 	private Client client;
@@ -70,6 +74,9 @@ public class RequiredMaterialsPlugin extends Plugin
 	private HeldItems heldItems;
 
 	@Inject
+	private HouseContents houseContents;
+
+	@Inject
 	private RequiredMaterialsConfig config;
 
 	@Inject
@@ -91,6 +98,7 @@ public class RequiredMaterialsPlugin extends Plugin
 	private String lastKnownGuideV2Title;
 	private String lastKnownGuideV1Title;
 	private String pendingContinuationPartName;
+	private int ticksSinceSceneLoad = -1;
 
 	@Provides
 	RequiredMaterialsConfig provideConfig(ConfigManager configManager)
@@ -101,10 +109,18 @@ public class RequiredMaterialsPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new RequiredMaterialsPanel(materialsManager, client, clientThread, skillIconManager, heldItems);
+		panel = new RequiredMaterialsPanel(materialsManager, client, clientThread, skillIconManager, heldItems, houseContents);
 
 		// load() resolves item ids, which must happen on the client thread - startUp() isn't
 		// guaranteed to be on it (e.g. toggled from the config UI).
+		houseContents.onResolved(() -> clientThread.invoke(() ->
+		{
+			if (panel != null)
+			{
+				panel.refresh();
+			}
+		}));
+
 		clientThread.invoke(() ->
 		{
 			materialsManager.load();
@@ -219,7 +235,7 @@ public class RequiredMaterialsPlugin extends Plugin
 				boolean tracked;
 				if (recipe != null)
 				{
-					materialsManager.track(partName, recipe.getMaterials(), recipe.getLevelRequirements(), recipe.getQuantityOmitted(), !buildClick);
+					materialsManager.track(partName, recipe.getMaterials(), recipe.getLevelRequirements(), recipe.getPrerequisites(), !buildClick);
 					tracked = true;
 				}
 				else
@@ -424,6 +440,35 @@ public class RequiredMaterialsPlugin extends Plugin
 			}
 		}
 		return null;
+	}
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event)
+	{
+		if (event.getGameState() == GameState.LOADING)
+		{
+			ticksSinceSceneLoad = 0;
+		}
+	}
+
+	@Subscribe
+	public void onGameTick(GameTick event)
+	{
+		if (ticksSinceSceneLoad < 0)
+		{
+			return;
+		}
+
+		// Built furniture is spawned a few ticks after the scene itself; scanning immediately
+		// finds only the empty hotspots.
+		if (++ticksSinceSceneLoad >= HOUSE_SCAN_DELAY_TICKS)
+		{
+			ticksSinceSceneLoad = -1;
+			if (houseContents.scanScene() && panel != null)
+			{
+				panel.refresh();
+			}
+		}
 	}
 
 	@Subscribe

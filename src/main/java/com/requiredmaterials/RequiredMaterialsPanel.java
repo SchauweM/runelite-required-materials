@@ -56,17 +56,19 @@ public class RequiredMaterialsPanel extends PluginPanel
 	private final ClientThread clientThread;
 	private final SkillIconManager skillIconManager;
 	private final HeldItems heldItems;
+	private final HouseContents houseContents;
 	private final JPanel listContainer = new JPanel();
 	private final Map<String, Integer> selectedVariantIndex = new HashMap<>();
 	private final Map<String, Boolean> skillExpanded = new HashMap<>();
 
-	RequiredMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread, SkillIconManager skillIconManager, HeldItems heldItems)
+	RequiredMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread, SkillIconManager skillIconManager, HeldItems heldItems, HouseContents houseContents)
 	{
 		this.materialsManager = materialsManager;
 		this.client = client;
 		this.clientThread = clientThread;
 		this.skillIconManager = skillIconManager;
 		this.heldItems = heldItems;
+		this.houseContents = houseContents;
 
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -368,9 +370,12 @@ public class RequiredMaterialsPanel extends PluginPanel
 			}
 			for (String prerequisite : requirement.getPrerequisites())
 			{
-				// Whether it's already built isn't something the client tells us, so it stays
-				// neutral rather than claiming either way.
-				content.add(wrappedText("Requires: " + prerequisite + " built", ColorScheme.LIGHT_GRAY_COLOR));
+				// Green once we've seen it in the house; grey while we can't say, which covers
+				// both "not built" and "haven't been inside yet".
+				Color color = Boolean.TRUE.equals(houseContents.isBuilt(prerequisite))
+					? COLOR_HAVE_ENOUGH
+					: ColorScheme.LIGHT_GRAY_COLOR;
+				content.add(wrappedText("Requires: " + prerequisite + " built", color));
 			}
 			content.add(Box.createVerticalStrut(6));
 			content.add(divider());
