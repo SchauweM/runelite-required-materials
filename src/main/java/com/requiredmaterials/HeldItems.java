@@ -19,6 +19,11 @@ class HeldItems
 	@Inject
 	private BankSnapshot bankSnapshot;
 
+	boolean bankKnown()
+	{
+		return client.getItemContainer(InventoryID.BANK) != null || bankSnapshot.isKnown();
+	}
+
 	int count(int itemId)
 	{
 		ItemContainer bank = client.getItemContainer(InventoryID.BANK);

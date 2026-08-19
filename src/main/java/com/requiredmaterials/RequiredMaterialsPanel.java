@@ -91,8 +91,6 @@ public class RequiredMaterialsPanel extends PluginPanel
 		JPanel top = new JPanel();
 		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 		top.add(header);
-		top.add(Box.createVerticalStrut(4));
-		top.add(wrappedText("Counts include your bank and inventory.", ColorScheme.LIGHT_GRAY_COLOR));
 
 		listContainer.setLayout(new BoxLayout(listContainer, BoxLayout.Y_AXIS));
 
@@ -122,11 +120,27 @@ public class RequiredMaterialsPanel extends PluginPanel
 		if (materialsManager.isEmpty())
 		{
 			listContainer.add(wrappedText(
-				"Nothing tracked yet. Click a ship upgrade's requirements, a Furniture Creation item, or any item in the Sailing or Construction skill guide in-game to start tracking.",
+				"Nothing tracked yet. Open the Construction or Sailing skill guide and click on a piece of furniture or ship facility to start tracking the required materials. You can also start tracking required materials from the Furniture Creation or the Boat Customisation menus.",
 				ColorScheme.LIGHT_GRAY_COLOR));
 		}
 		else
 		{
+			if (!heldItems.bankKnown())
+			{
+				listContainer.add(wrappedText(
+					"Open your bank to update the tracked required materials.",
+					ColorScheme.LIGHT_GRAY_COLOR));
+				listContainer.add(Box.createVerticalStrut(6));
+			}
+
+			if (hasUnconfirmedPrerequisite())
+			{
+				listContainer.add(wrappedText(
+					"Visit your POH in building mode to check what's already built.",
+					ColorScheme.LIGHT_GRAY_COLOR));
+				listContainer.add(Box.createVerticalStrut(6));
+			}
+
 			// getRequirements() is in tracking order, so a skill's highest position is the last
 			// time anything was tracked under it.
 			Map<String, List<TrackedRequirement>> byPart = new LinkedHashMap<>();
@@ -159,6 +173,25 @@ public class RequiredMaterialsPanel extends PluginPanel
 
 		listContainer.revalidate();
 		listContainer.repaint();
+	}
+
+	/**
+	 * Whether anything is waiting on a look inside the house - the hint is pointless once every
+	 * prerequisite is confirmed, and misleading when nothing has any.
+	 */
+	private boolean hasUnconfirmedPrerequisite()
+	{
+		for (TrackedRequirement requirement : materialsManager.getRequirements())
+		{
+			for (String prerequisite : requirement.getPrerequisites())
+			{
+				if (!Boolean.TRUE.equals(houseContents.isBuilt(prerequisite)))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	private JPanel buildAccordion(String skill, List<Map.Entry<String, List<TrackedRequirement>>> groups, boolean defaultExpanded)
@@ -296,8 +329,9 @@ public class RequiredMaterialsPanel extends PluginPanel
 		card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		card.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
 
-		JLabel name = new JLabel(title);
-		name.setForeground(ColorScheme.BRAND_ORANGE);
+		// Wraps rather than truncating: the panel is narrow, and narrower still once a scrollbar
+		// appears, which was enough to cut "Oak chest of drawers" down to "Oak chest of dr...".
+		JTextArea name = wrappedText(title, ColorScheme.BRAND_ORANGE);
 
 		JButton remove = new JButton("x");
 		remove.setMargin(new java.awt.Insets(0, 4, 0, 4));
@@ -312,7 +346,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 
 		JPanel cardHeader = new JPanel(new BorderLayout());
 		cardHeader.setOpaque(false);
-		cardHeader.add(name, BorderLayout.WEST);
+		cardHeader.add(name, BorderLayout.CENTER);
 		cardHeader.add(remove, BorderLayout.EAST);
 
 		card.add(cardHeader, BorderLayout.NORTH);
@@ -336,6 +370,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 
 		JPanel pickerRow = new JPanel(new BorderLayout());
 		pickerRow.setOpaque(false);
+		pickerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 		pickerRow.add(variantPicker, BorderLayout.WEST);
 
 		JPanel section = new JPanel();
@@ -361,6 +396,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		JPanel content = new JPanel();
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 		content.setOpaque(false);
+		content.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		if (!requirement.getLevelRequirements().isEmpty() || !requirement.getPrerequisites().isEmpty())
 		{
@@ -442,6 +478,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		line.setBackground(ColorScheme.MEDIUM_GRAY_COLOR);
 		line.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
 		line.setPreferredSize(new Dimension(Integer.MAX_VALUE, 1));
+		line.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return line;
 	}
 
@@ -461,6 +498,10 @@ public class RequiredMaterialsPanel extends PluginPanel
 		area.setFont(new JLabel().getFont());
 		area.setBorder(null);
 		area.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+		// JComponent defaults to centre alignment. In a BoxLayout that mixes it with the
+		// left-aligned rows, everything is laid out against a wider virtual width and the rows
+		// end up half the panel.
+		area.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return area;
 	}
 }

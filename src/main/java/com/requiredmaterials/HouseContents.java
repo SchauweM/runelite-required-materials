@@ -198,7 +198,9 @@ class HouseContents
 
 	private void load()
 	{
-		if (seen != null)
+		// Re-reads while empty: per-account config isn't readable until logged in, so an empty
+		// first read means "not available yet" rather than "nothing stored".
+		if (seen != null && !seen.isEmpty())
 		{
 			return;
 		}
