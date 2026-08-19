@@ -13,11 +13,17 @@ Click anything you want to build:
 | Boat Customisation | **Build** or **Check Materials** |
 | Furniture Creation menu | **Build** |
 
+Clicking **Build** on something you can already make won't add it — there's nothing left to
+collect.
+
 ## Reading your list
 
 The plugin checks your bank and inventory against what each build needs.
 
 <img src="docs/side-panel.png" alt="The side panel showing tracked builds" width="300">
+
+Upgrades need the previous version built first. Visit your house once in building mode and the
+plugin remembers what's in there, so those lines turn green too.
 
 ## Using it at the bank
 
@@ -25,6 +31,13 @@ The hammer button near the scrollbar regroups your bank around what you're colle
 again to put your bank back.
 
 <img src="docs/bank-view.png" alt="The bank grouped by build" width="600">
+
+## Settings
+
+| Setting | Default | What it does |
+|---|---|---|
+| Don't track builds you can already make | on | Clicking **Build** on something you have everything for won't add it to your list |
+| Clear builds when you make them | off | Building something takes it off your list |
 
 ## Where the numbers come from
 
