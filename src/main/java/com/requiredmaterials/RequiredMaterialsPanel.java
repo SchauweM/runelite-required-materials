@@ -55,18 +55,18 @@ public class RequiredMaterialsPanel extends PluginPanel
 	private final Client client;
 	private final ClientThread clientThread;
 	private final SkillIconManager skillIconManager;
-	private final BankSnapshot bankSnapshot;
+	private final HeldItems heldItems;
 	private final JPanel listContainer = new JPanel();
 	private final Map<String, Integer> selectedVariantIndex = new HashMap<>();
 	private final Map<String, Boolean> skillExpanded = new HashMap<>();
 
-	RequiredMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread, SkillIconManager skillIconManager, BankSnapshot bankSnapshot)
+	RequiredMaterialsPanel(MaterialsManager materialsManager, Client client, ClientThread clientThread, SkillIconManager skillIconManager, HeldItems heldItems)
 	{
 		this.materialsManager = materialsManager;
 		this.client = client;
 		this.clientThread = clientThread;
 		this.skillIconManager = skillIconManager;
-		this.bankSnapshot = bankSnapshot;
+		this.heldItems = heldItems;
 
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -172,7 +172,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		skillLabel.setForeground(ColorScheme.BRAND_ORANGE);
 		skillLabel.setFont(skillLabel.getFont().deriveFont(Font.BOLD));
 
-		Skill skillEnum = findSkillByName(skill);
+		Skill skillEnum = LevelRequirement.named(skill);
 		JLabel skillIcon = skillEnum != null
 			? new JLabel(new ImageIcon(skillIconManager.getSkillImage(skillEnum, true)))
 			: null;
@@ -360,11 +360,17 @@ public class RequiredMaterialsPanel extends PluginPanel
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 		content.setOpaque(false);
 
-		if (!requirement.getLevelRequirements().isEmpty())
+		if (!requirement.getLevelRequirements().isEmpty() || !requirement.getPrerequisites().isEmpty())
 		{
 			for (String levelRequirement : requirement.getLevelRequirements())
 			{
 				content.add(buildLevelRequirementLine(levelRequirement));
+			}
+			for (String prerequisite : requirement.getPrerequisites())
+			{
+				// Whether it's already built isn't something the client tells us, so it stays
+				// neutral rather than claiming either way.
+				content.add(wrappedText("Requires: " + prerequisite + " built", ColorScheme.LIGHT_GRAY_COLOR));
 			}
 			content.add(Box.createVerticalStrut(6));
 			content.add(divider());
@@ -377,11 +383,9 @@ public class RequiredMaterialsPanel extends PluginPanel
 		}
 		else
 		{
-			ItemContainer bank = client.getItemContainer(InventoryID.BANK);
-			ItemContainer inventory = client.getItemContainer(InventoryID.INV);
 			for (RequiredMaterial material : requirement.getMaterials())
 			{
-				content.add(buildMaterialLine(material, bank, inventory));
+				content.add(buildMaterialLine(material));
 			}
 		}
 
@@ -390,38 +394,13 @@ public class RequiredMaterialsPanel extends PluginPanel
 
 	private JTextArea buildLevelRequirementLine(String levelRequirement)
 	{
-		Color color = ColorScheme.LIGHT_GRAY_COLOR;
-		Matcher matcher = LEVEL_REQUIREMENT_PATTERN.matcher(levelRequirement);
-		if (matcher.matches())
-		{
-			int requiredLevel = Integer.parseInt(matcher.group(1));
-			Skill skill = findSkillByName(matcher.group(2).trim());
-			if (skill != null && client.getRealSkillLevel(skill) >= requiredLevel)
-			{
-				color = COLOR_HAVE_ENOUGH;
-			}
-		}
+		Color color = LevelRequirement.isMet(client, levelRequirement)
+			? COLOR_HAVE_ENOUGH
+			: ColorScheme.LIGHT_GRAY_COLOR;
 		return wrappedText("Requires: " + levelRequirement, color);
 	}
 
-	private int count(ItemContainer container, int itemId)
-	{
-		return container == null ? 0 : container.count(itemId);
-	}
-
-	private Skill findSkillByName(String name)
-	{
-		for (Skill skill : Skill.values())
-		{
-			if (skill.getName().equalsIgnoreCase(name))
-			{
-				return skill;
-			}
-		}
-		return null;
-	}
-
-	private JTextArea buildMaterialLine(RequiredMaterial material, ItemContainer bank, ItemContainer inventory)
+	private JTextArea buildMaterialLine(RequiredMaterial material)
 	{
 		if (material.getItemId() == null)
 		{
@@ -429,10 +408,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 			return wrappedText(text, ColorScheme.PROGRESS_ERROR_COLOR);
 		}
 
-		// The bank container only exists once the bank has been opened this session; fall back to
-		// what it held last time so counts survive a restart.
-		int inBank = bank != null ? bank.count(material.getItemId()) : bankSnapshot.count(material.getItemId());
-		int have = inBank + count(inventory, material.getItemId());
+		int have = heldItems.count(material.getItemId());
 		int need = material.getQuantity();
 
 		// have == 0 could mean "own none" or "bank not opened yet", so it stays neutral gray

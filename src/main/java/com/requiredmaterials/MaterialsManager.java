@@ -6,10 +6,12 @@ import com.google.gson.reflect.TypeToken;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -49,6 +51,9 @@ public class MaterialsManager
 	private ItemManager itemManager;
 
 	@Inject
+	private HeldItems heldItems;
+
+	@Inject
 	private Gson gson;
 
 	private final Map<String, TrackedRequirement> requirements = new LinkedHashMap<>();
@@ -56,22 +61,81 @@ public class MaterialsManager
 
 	public void track(String partName, Map<String, Integer> materialQuantities, List<String> levelRequirements)
 	{
+		track(partName, materialQuantities, levelRequirements, Collections.emptySet(), true);
+	}
+
+	public void track(String partName, Map<String, Integer> materialQuantities, List<String> levelRequirements, boolean moveToBottom)
+	{
+		track(partName, materialQuantities, levelRequirements, Collections.emptySet(), moveToBottom);
+	}
+
+	/**
+	 * @param moveToBottom whether re-tracking should reorder the list. True when the player picks
+	 * something out again, which is a fresh expression of interest; false when they click Build,
+	 * where they're acting on the part rather than re-prioritising it.
+	 */
+	public void track(String partName, Map<String, Integer> materialQuantities, List<String> levelRequirements,
+		Set<String> quantityOmitted, boolean moveToBottom)
+	{
 		List<RequiredMaterial> materials = new ArrayList<>();
+		List<String> prerequisites = new ArrayList<>();
 		for (Map.Entry<String, Integer> entry : materialQuantities.entrySet())
 		{
+			Integer itemId = resolveItemId(entry.getKey());
+
+			// The wiki lists a furniture upgrade's previous tier as a material with no quantity.
+			// A real item that just happens to omit its quantity still resolves, so needing both
+			// keeps those apart - and keeps a genuine lookup failure visible as one.
+			if (itemId == null && quantityOmitted.contains(entry.getKey()))
+			{
+				prerequisites.add(entry.getKey());
+				continue;
+			}
+
 			RequiredMaterial material = new RequiredMaterial(entry.getKey(), entry.getValue());
-			material.setItemId(resolveItemId(entry.getKey()));
+			material.setItemId(itemId);
 			materials.add(material);
 		}
 
 		TrackedRequirement requirement = new TrackedRequirement(partName, materials);
 		requirement.setLevelRequirements(levelRequirements);
+		requirement.setPrerequisites(prerequisites);
 
-		// Remove first: a re-put keeps the key's original position, but re-tracking should move
-		// the part to the bottom of the list.
-		requirements.remove(partName);
+		// A re-put keeps the key's original position, so moving to the bottom needs an explicit
+		// remove first.
+		if (moveToBottom)
+		{
+			requirements.remove(partName);
+		}
 		requirements.put(partName, requirement);
 		save();
+	}
+
+	/**
+	 * Whether the player could build this right now - every material to hand and every level met.
+	 * A material whose name doesn't resolve to an item counts as missing, since we can't count
+	 * something we can't identify.
+	 */
+	boolean canBuild(Map<String, Integer> materials, List<String> levelRequirements)
+	{
+		for (Map.Entry<String, Integer> material : materials.entrySet())
+		{
+			Integer itemId = resolveItemId(material.getKey());
+			if (itemId == null || heldItems.count(itemId) < material.getValue())
+			{
+				return false;
+			}
+		}
+
+		for (String requirement : levelRequirements)
+		{
+			if (!LevelRequirement.isMet(client, requirement))
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private Integer resolveItemId(String itemName)
@@ -174,7 +238,7 @@ public class MaterialsManager
 			List<SavedMaterial> materials = requirement.getMaterials().stream()
 				.map(m -> new SavedMaterial(m.getName(), m.getQuantity()))
 				.collect(Collectors.toList());
-			toSave.put(requirement.getPartName(), new SavedRequirement(materials, requirement.getLevelRequirements(), requirement.getSkill()));
+			toSave.put(requirement.getPartName(), new SavedRequirement(materials, requirement.getLevelRequirements(), requirement.getSkill(), requirement.getPrerequisites()));
 		}
 		configManager.setConfiguration(CONFIG_GROUP, CONFIG_KEY_TRACKED, gson.toJson(toSave));
 	}
@@ -219,6 +283,10 @@ public class MaterialsManager
 				requirement.setLevelRequirements(entry.getValue().levelRequirements);
 			}
 			requirement.setSkill(entry.getValue().skill);
+			if (entry.getValue().prerequisites != null)
+			{
+				requirement.setPrerequisites(entry.getValue().prerequisites);
+			}
 			requirements.put(entry.getKey(), requirement);
 		}
 	}
@@ -228,12 +296,14 @@ public class MaterialsManager
 		List<SavedMaterial> materials;
 		List<String> levelRequirements;
 		String skill;
+		List<String> prerequisites;
 
-		SavedRequirement(List<SavedMaterial> materials, List<String> levelRequirements, String skill)
+		SavedRequirement(List<SavedMaterial> materials, List<String> levelRequirements, String skill, List<String> prerequisites)
 		{
 			this.materials = materials;
 			this.levelRequirements = levelRequirements;
 			this.skill = skill;
+			this.prerequisites = prerequisites;
 		}
 	}
 
