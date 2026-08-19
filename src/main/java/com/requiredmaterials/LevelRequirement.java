@@ -5,10 +5,7 @@ import java.util.regex.Pattern;
 import net.runelite.api.Client;
 import net.runelite.api.Skill;
 
-/**
- * Level requirements are carried around as text ("Level 20 Sailing") because that's how they're
- * shown; this reads one back well enough to check it against the player.
- */
+/** Level requirements are carried as text ("Level 20 Sailing"); this reads one back. */
 final class LevelRequirement
 {
 	private static final Pattern PATTERN = Pattern.compile("^Level (\\d+) (.+)$", Pattern.CASE_INSENSITIVE);
@@ -17,9 +14,7 @@ final class LevelRequirement
 	{
 	}
 
-	/**
-	 * @return the level, or -1 if this isn't a recognisable "Level N Skill".
-	 */
+	/** @return the level, or -1 if unparseable. */
 	static int levelIn(String requirement)
 	{
 		Matcher matcher = PATTERN.matcher(requirement);

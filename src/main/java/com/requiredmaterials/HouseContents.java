@@ -19,16 +19,11 @@ import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.config.ConfigManager;
 
 /**
- * What's been seen built in the player's house, so a furniture prerequisite can be answered
- * without asking them.
+ * What's been seen built in the player's house, remembered per account.
  *
- * The client offers no direct reading of house contents - no varbit per hotspot - so this reads
- * the scene while they're inside. Built furniture is spawned a few ticks after the scene loads,
- * and lives across all four kinds of tile object (a tool store is on a wall, not the floor), so
- * the scan is deliberately late and covers all of them.
- *
- * Results are remembered per account, so the answer survives leaving the house and restarting
- * the client.
+ * There's no varbit per hotspot, so this reads the scene instead - late, because furniture is
+ * spawned a few ticks after the scene loads, and across all four tile object kinds, because a
+ * tool store is on a wall rather than the floor.
  */
 @Slf4j
 @Singleton

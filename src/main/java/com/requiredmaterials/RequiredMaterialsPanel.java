@@ -290,8 +290,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		card.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
 
-		// Wraps rather than truncating: the panel is narrow, and narrower still once a scrollbar
-		// appears, which was enough to cut "Oak chest of drawers" down to "Oak chest of dr...".
+		// Wraps rather than truncating - a scrollbar appearing is enough to cut a title short.
 		JTextArea name = wrappedText(title, ColorScheme.BRAND_ORANGE);
 
 		JButton remove = new JButton("x");
@@ -352,7 +351,6 @@ public class RequiredMaterialsPanel extends PluginPanel
 		return section;
 	}
 
-	/** Falls back to the whole name so a picker never shows a blank entry. */
 	private String boatSize(String partName)
 	{
 		String size = PartNames.boatSizeOf(partName);
@@ -466,9 +464,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 		area.setFont(new JLabel().getFont());
 		area.setBorder(null);
 		area.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-		// JComponent defaults to centre alignment. In a BoxLayout that mixes it with the
-		// left-aligned rows, everything is laid out against a wider virtual width and the rows
-		// end up half the panel.
+		// Mixed alignments in a BoxLayout shrink the rows to half the panel.
 		area.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return area;
 	}
