@@ -49,6 +49,9 @@ public class MaterialsManager
 	private ItemManager itemManager;
 
 	@Inject
+	private HeldItems heldItems;
+
+	@Inject
 	private Gson gson;
 
 	private final Map<String, TrackedRequirement> requirements = new LinkedHashMap<>();
@@ -72,6 +75,33 @@ public class MaterialsManager
 		requirements.remove(partName);
 		requirements.put(partName, requirement);
 		save();
+	}
+
+	/**
+	 * Whether the player could build this right now - every material to hand and every level met.
+	 * A material whose name doesn't resolve to an item counts as missing, since we can't count
+	 * something we can't identify.
+	 */
+	boolean canBuild(Map<String, Integer> materials, List<String> levelRequirements)
+	{
+		for (Map.Entry<String, Integer> material : materials.entrySet())
+		{
+			Integer itemId = resolveItemId(material.getKey());
+			if (itemId == null || heldItems.count(itemId) < material.getValue())
+			{
+				return false;
+			}
+		}
+
+		for (String requirement : levelRequirements)
+		{
+			if (!LevelRequirement.isMet(client, requirement))
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private Integer resolveItemId(String itemName)

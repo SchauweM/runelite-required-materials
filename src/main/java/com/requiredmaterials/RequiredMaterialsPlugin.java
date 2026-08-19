@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
@@ -22,6 +23,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.SkillIconManager;
 import net.runelite.client.plugins.Plugin;
@@ -65,6 +67,12 @@ public class RequiredMaterialsPlugin extends Plugin
 	private BankSnapshot bankSnapshot;
 
 	@Inject
+	private HeldItems heldItems;
+
+	@Inject
+	private RequiredMaterialsConfig config;
+
+	@Inject
 	private BankButtonManager bankButtonManager;
 
 	@Inject
@@ -84,10 +92,16 @@ public class RequiredMaterialsPlugin extends Plugin
 	private String lastKnownGuideV1Title;
 	private String pendingContinuationPartName;
 
+	@Provides
+	RequiredMaterialsConfig provideConfig(ConfigManager configManager)
+	{
+		return configManager.getConfig(RequiredMaterialsConfig.class);
+	}
+
 	@Override
 	protected void startUp()
 	{
-		panel = new RequiredMaterialsPanel(materialsManager, client, clientThread, skillIconManager, bankSnapshot);
+		panel = new RequiredMaterialsPanel(materialsManager, client, clientThread, skillIconManager, heldItems);
 
 		// load() resolves item ids, which must happen on the client thread - startUp() isn't
 		// guaranteed to be on it (e.g. toggled from the config UI).
@@ -149,7 +163,7 @@ public class RequiredMaterialsPlugin extends Plugin
 			String materialsText = message.substring(matcher.end()).trim();
 			pendingContinuationPartName = chatMaterialsParser.accumulate(partName, materialsText) ? partName : null;
 
-			trackFromWiki(partName, currentSkillSource());
+			trackFromWiki(partName, currentSkillSource(), false);
 		}
 		else if (pendingContinuationPartName != null)
 		{
@@ -171,11 +185,11 @@ public class RequiredMaterialsPlugin extends Plugin
 		String partName = TAG_PATTERN.matcher(event.getMenuTarget()).replaceAll("").trim();
 		if (furnitureCreationOpen)
 		{
-			trackFromWiki(partName, "Construction");
+			trackFromWiki(partName, "Construction", true);
 		}
 		else if (shipCustomisationOpen)
 		{
-			trackFromWiki(partName, "Sailing");
+			trackFromWiki(partName, "Sailing", true);
 		}
 	}
 
@@ -184,7 +198,7 @@ public class RequiredMaterialsPlugin extends Plugin
 	 * items with no recipe there. The wiki callback runs off the client thread, so tracking
 	 * hops back onto it.
 	 */
-	private void trackFromWiki(String partName, String skill)
+	private void trackFromWiki(String partName, String skill, boolean buildClick)
 	{
 		List<String> pageNames = wikiPageCandidates(partName, skill);
 		String variant = wikiVariant(partName, skill);
@@ -195,6 +209,16 @@ public class RequiredMaterialsPlugin extends Plugin
 
 			clientThread.invoke(() ->
 			{
+				if (buildClick && recipe != null
+					&& materialsManager.canBuild(recipe.getMaterials(), recipe.getLevelRequirements()))
+				{
+					onBuiltWhatTheyHad(partName);
+					if (!config.trackBuildable())
+					{
+						return;
+					}
+				}
+
 				boolean tracked;
 				if (recipe != null)
 				{
@@ -219,6 +243,25 @@ public class RequiredMaterialsPlugin extends Plugin
 				}
 			});
 		});
+	}
+
+	/**
+	 * Clicking Build with everything already to hand means it's built, so there's nothing left to
+	 * collect for it. Clicking Build isn't proof the build finished - it can still be cancelled -
+	 * but having every material and level is the closest signal the client gives us.
+	 */
+	private void onBuiltWhatTheyHad(String partName)
+	{
+		if (!config.clearWhenBuilt())
+		{
+			return;
+		}
+
+		materialsManager.remove(partName);
+		if (panel != null)
+		{
+			panel.refresh();
+		}
 	}
 
 	private boolean trackFromChatFallback(String partName)
