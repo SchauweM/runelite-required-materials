@@ -360,11 +360,17 @@ public class RequiredMaterialsPanel extends PluginPanel
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 		content.setOpaque(false);
 
-		if (!requirement.getLevelRequirements().isEmpty())
+		if (!requirement.getLevelRequirements().isEmpty() || !requirement.getPrerequisites().isEmpty())
 		{
 			for (String levelRequirement : requirement.getLevelRequirements())
 			{
 				content.add(buildLevelRequirementLine(levelRequirement));
+			}
+			for (String prerequisite : requirement.getPrerequisites())
+			{
+				// Whether it's already built isn't something the client tells us, so it stays
+				// neutral rather than claiming either way.
+				content.add(wrappedText("Requires: " + prerequisite + " built", ColorScheme.LIGHT_GRAY_COLOR));
 			}
 			content.add(Box.createVerticalStrut(6));
 			content.add(divider());

@@ -8,14 +8,14 @@ import net.runelite.client.config.ConfigItem;
 public interface RequiredMaterialsConfig extends Config
 {
 	@ConfigItem(
-		keyName = "trackBuildable",
-		name = "Track builds you can already make",
-		description = "When off, clicking Build on something you already have the materials and levels for won't add it to your list.",
+		keyName = "skipBuildable",
+		name = "Don't track builds you can already make",
+		description = "Clicking Build on something you already have the materials and levels for won't add it to your list.",
 		position = 1
 	)
-	default boolean trackBuildable()
+	default boolean skipBuildable()
 	{
-		return false;
+		return true;
 	}
 
 	@ConfigItem(

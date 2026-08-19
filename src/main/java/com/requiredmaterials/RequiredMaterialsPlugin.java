@@ -210,24 +210,21 @@ public class RequiredMaterialsPlugin extends Plugin
 			clientThread.invoke(() ->
 			{
 				if (buildClick && recipe != null
-					&& materialsManager.canBuild(recipe.getMaterials(), recipe.getLevelRequirements()))
+					&& materialsManager.canBuild(recipe.getMaterials(), recipe.getLevelRequirements())
+					&& handleBuiltWhatTheyHad(partName))
 				{
-					onBuiltWhatTheyHad(partName);
-					if (!config.trackBuildable())
-					{
-						return;
-					}
+					return;
 				}
 
 				boolean tracked;
 				if (recipe != null)
 				{
-					materialsManager.track(partName, recipe.getMaterials(), recipe.getLevelRequirements());
+					materialsManager.track(partName, recipe.getMaterials(), recipe.getLevelRequirements(), recipe.getQuantityOmitted(), !buildClick);
 					tracked = true;
 				}
 				else
 				{
-					tracked = "Construction".equals(skill) && trackFromChatFallback(partName);
+					tracked = "Construction".equals(skill) && trackFromChatFallback(partName, !buildClick);
 				}
 
 				if (!tracked)
@@ -248,23 +245,29 @@ public class RequiredMaterialsPlugin extends Plugin
 	/**
 	 * Clicking Build with everything already to hand means it's built, so there's nothing left to
 	 * collect for it. Clicking Build isn't proof the build finished - it can still be cancelled -
-	 * but having every material and level is the closest signal the client gives us.
+	 * but having every material and level is the closest signal the client gives.
+	 *
+	 * Clearing wins over tracking when both settings are on: removing it and then adding it
+	 * straight back would leave it on the list anyway, just reordered.
+	 *
+	 * @return true if this build shouldn't be tracked.
 	 */
-	private void onBuiltWhatTheyHad(String partName)
+	private boolean handleBuiltWhatTheyHad(String partName)
 	{
-		if (!config.clearWhenBuilt())
+		if (config.clearWhenBuilt())
 		{
-			return;
+			materialsManager.remove(partName);
+			if (panel != null)
+			{
+				panel.refresh();
+			}
+			return true;
 		}
 
-		materialsManager.remove(partName);
-		if (panel != null)
-		{
-			panel.refresh();
-		}
+		return config.skipBuildable();
 	}
 
-	private boolean trackFromChatFallback(String partName)
+	private boolean trackFromChatFallback(String partName, boolean moveToBottom)
 	{
 		Map<String, Integer> materials = chatMaterialsParser.getMaterials(partName);
 		if (materials == null || materials.isEmpty())
@@ -272,7 +275,7 @@ public class RequiredMaterialsPlugin extends Plugin
 			return false;
 		}
 
-		materialsManager.track(partName, materials, guideLevelReader.findLevelRequirements(client, partName, "Construction"));
+		materialsManager.track(partName, materials, guideLevelReader.findLevelRequirements(client, partName, "Construction"), moveToBottom);
 		return true;
 	}
 

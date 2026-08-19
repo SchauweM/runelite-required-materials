@@ -8,8 +8,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -54,6 +56,12 @@ public class WikiRecipeService
 		String outputSubtext;
 		Map<String, Integer> materials;
 		List<String> levelRequirements;
+		/**
+		 * Materials the wiki gave no quantity for. Usually that just means one, but furniture
+		 * upgrades list the previous tier the same way ("mat1 = Tool store 3"), so the caller
+		 * needs to tell the two apart - only it can check whether the name is a real item.
+		 */
+		Set<String> quantityOmitted;
 	}
 
 	/**
@@ -184,6 +192,7 @@ public class WikiRecipeService
 	private Recipe buildRecipe(Map<String, String> params)
 	{
 		Map<String, Integer> materials = new LinkedHashMap<>();
+		Set<String> quantityOmitted = new LinkedHashSet<>();
 		for (int i = 1; i <= 10; i++)
 		{
 			String name = params.get("mat" + i);
@@ -192,11 +201,17 @@ public class WikiRecipeService
 				continue;
 			}
 
-			// A quantity of 1 is often omitted rather than written out.
 			String quantity = params.get("mat" + i + "quantity");
+			if (quantity == null || quantity.isEmpty())
+			{
+				materials.put(name, 1);
+				quantityOmitted.add(name);
+				continue;
+			}
+
 			try
 			{
-				materials.put(name, quantity == null || quantity.isEmpty() ? 1 : Integer.parseInt(quantity.trim()));
+				materials.put(name, Integer.parseInt(quantity.trim()));
 			}
 			catch (NumberFormatException ignored)
 			{
@@ -207,7 +222,7 @@ public class WikiRecipeService
 		addLevelRequirement(levelRequirements, params, "skill1", "skill1lvl");
 		addLevelRequirement(levelRequirements, params, "skill2", "skill2lvl");
 
-		return new Recipe(params.get("output1subtxt"), materials, levelRequirements);
+		return new Recipe(params.get("output1subtxt"), materials, levelRequirements, quantityOmitted);
 	}
 
 	private void addLevelRequirement(List<String> levelRequirements, Map<String, String> params, String skillKey, String levelKey)
