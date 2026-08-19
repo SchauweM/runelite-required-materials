@@ -75,31 +75,19 @@ public class MaterialsManager
 	 * where they're acting on the part rather than re-prioritising it.
 	 */
 	public void track(String partName, Map<String, Integer> materialQuantities, List<String> levelRequirements,
-		Set<String> quantityOmitted, boolean moveToBottom)
+		Set<String> prerequisites, boolean moveToBottom)
 	{
 		List<RequiredMaterial> materials = new ArrayList<>();
-		List<String> prerequisites = new ArrayList<>();
 		for (Map.Entry<String, Integer> entry : materialQuantities.entrySet())
 		{
-			Integer itemId = resolveItemId(entry.getKey());
-
-			// The wiki lists a furniture upgrade's previous tier as a material with no quantity.
-			// A real item that just happens to omit its quantity still resolves, so needing both
-			// keeps those apart - and keeps a genuine lookup failure visible as one.
-			if (itemId == null && quantityOmitted.contains(entry.getKey()))
-			{
-				prerequisites.add(entry.getKey());
-				continue;
-			}
-
 			RequiredMaterial material = new RequiredMaterial(entry.getKey(), entry.getValue());
-			material.setItemId(itemId);
+			material.setItemId(resolveItemId(entry.getKey()));
 			materials.add(material);
 		}
 
 		TrackedRequirement requirement = new TrackedRequirement(partName, materials);
 		requirement.setLevelRequirements(levelRequirements);
-		requirement.setPrerequisites(prerequisites);
+		requirement.setPrerequisites(new ArrayList<>(prerequisites));
 
 		// A re-put keeps the key's original position, so moving to the bottom needs an explicit
 		// remove first.
