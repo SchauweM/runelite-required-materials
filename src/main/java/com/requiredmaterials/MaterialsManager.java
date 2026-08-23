@@ -108,8 +108,10 @@ public class MaterialsManager
 	{
 		for (Map.Entry<String, Integer> material : materials.entrySet())
 		{
+			// Inventory only: a build consumes what you're carrying, so materials sitting in the
+			// bank don't make it buildable.
 			Integer itemId = resolveItemId(material.getKey());
-			if (itemId == null || heldItems.count(itemId) < material.getValue())
+			if (itemId == null || heldItems.inInventory(itemId) < material.getValue())
 			{
 				return false;
 			}
