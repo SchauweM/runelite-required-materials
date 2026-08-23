@@ -45,8 +45,8 @@ import net.runelite.client.ui.PluginPanel;
  */
 public class RequiredMaterialsPanel extends PluginPanel
 {
-	private static final Color COLOR_HAVE_ENOUGH = new Color(96, 220, 96);
-	private static final Color COLOR_HAVE_SOME = new Color(255, 165, 0);
+	private static final Color COLOR_READY = new Color(96, 220, 96);
+	private static final Color COLOR_IN_BANK = Color.WHITE;
 	private static final Pattern LEVEL_REQUIREMENT_PATTERN = Pattern.compile("^Level (\\d+) (.+)$", Pattern.CASE_INSENSITIVE);
 	private static final Pattern VARIANT_SUFFIX = Pattern.compile("^(.*?)\\s*\\(([^)]*)\\)$");
 	private static final String UNKNOWN_SKILL = "Other";
@@ -377,7 +377,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 				// Green once we've seen it in the house; grey while we can't say, which covers
 				// both "not built" and "haven't been inside yet".
 				Color color = Boolean.TRUE.equals(houseContents.isBuilt(prerequisite))
-					? COLOR_HAVE_ENOUGH
+					? COLOR_READY
 					: ColorScheme.LIGHT_GRAY_COLOR;
 				content.add(wrappedText("Requires: " + prerequisite + " built", color));
 			}
@@ -404,7 +404,7 @@ public class RequiredMaterialsPanel extends PluginPanel
 	private JTextArea buildLevelRequirementLine(String levelRequirement)
 	{
 		Color color = LevelRequirement.isMet(client, levelRequirement)
-			? COLOR_HAVE_ENOUGH
+			? COLOR_READY
 			: ColorScheme.LIGHT_GRAY_COLOR;
 		return wrappedText("Requires: " + levelRequirement, color);
 	}
@@ -417,19 +417,20 @@ public class RequiredMaterialsPanel extends PluginPanel
 			return wrappedText(text, ColorScheme.PROGRESS_ERROR_COLOR);
 		}
 
-		int have = heldItems.count(material.getItemId());
+		int inInventory = heldItems.inInventory(material.getItemId());
+		int have = heldItems.inBank(material.getItemId()) + inInventory;
 		int need = material.getQuantity();
 
-		// have == 0 could mean "own none" or "bank not opened yet", so it stays neutral gray
-		// rather than flagging items you may already have.
+		// Green means you can build now, white means you own enough but it's still banked. Short
+		// of that it's grey, which also covers not having opened a bank yet.
 		Color color;
-		if (have >= need)
+		if (inInventory >= need)
 		{
-			color = COLOR_HAVE_ENOUGH;
+			color = COLOR_READY;
 		}
-		else if (have > 0)
+		else if (have >= need)
 		{
-			color = COLOR_HAVE_SOME;
+			color = COLOR_IN_BANK;
 		}
 		else
 		{

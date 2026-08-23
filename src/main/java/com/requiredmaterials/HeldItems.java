@@ -26,10 +26,18 @@ class HeldItems
 
 	int count(int itemId)
 	{
-		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
-		int inBank = bank != null ? bank.count(itemId) : bankSnapshot.count(itemId);
+		return inBank(itemId) + inInventory(itemId);
+	}
 
+	int inBank(int itemId)
+	{
+		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		return bank != null ? bank.count(itemId) : bankSnapshot.count(itemId);
+	}
+
+	int inInventory(int itemId)
+	{
 		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
-		return inBank + (inventory != null ? inventory.count(itemId) : 0);
+		return inventory != null ? inventory.count(itemId) : 0;
 	}
 }
